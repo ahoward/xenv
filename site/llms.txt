@@ -1,0 +1,25 @@
+# xenv
+
+> Blazing-fast, zero-dependency environment runner and secrets manager. Single ~10MB binary. AES-256-GCM encrypted vaults. 7-layer environment cascade. MCP server for AI coding agents. Compiles from Bun/TypeScript with no runtime dependencies.
+
+xenv manages environment variables and encrypted secrets for any project. it reads `.xenv` and `.env` files, decrypts vaults in memory (secrets never touch disk at runtime), and runs your command with the merged environment. it exposes an MCP server so AI coding tools can manage secrets natively via tool-use.
+
+## Docs
+
+- [README](https://github.com/ahoward/xenv/blob/main/README.md): full documentation — install, usage, encryption, cascade, comparison
+- [AGENTS.md](https://github.com/ahoward/xenv/blob/main/AGENTS.md): AI agent integration guide — commands, code style, security rules, architecture
+
+## API
+
+- [MCP Server](https://github.com/ahoward/xenv/blob/main/src/mcp.ts): 7 tools via JSON-RPC 2.0 over stdio — resolve_env, set_secret, delete_secret, list_secrets, rotate_key, audit, validate
+- [CLI Reference](https://github.com/ahoward/xenv#usage): 13 commands with --json support
+
+## Install
+
+- [install.sh](https://raw.githubusercontent.com/ahoward/xenv/main/install.sh): `curl -fsSL https://raw.githubusercontent.com/ahoward/xenv/main/install.sh | sh`
+- [Build from source](https://github.com/ahoward/xenv#building-from-source): `bun build ./src/cli.ts --compile --minify --outfile=xenv`
+
+## Source
+
+- [GitHub](https://github.com/ahoward/xenv): source code, issues, releases
+- [License](https://github.com/ahoward/xenv/blob/main/README.md#license): MIT

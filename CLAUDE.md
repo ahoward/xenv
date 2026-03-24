@@ -25,3 +25,7 @@ knowledge graph:
 
 state lives in `bny/`. do not modify state files directly.
 <!-- bny:end -->
+
+## project guide
+
+see [AGENTS.md](./AGENTS.md) for full project context: all commands, code style, architecture, testing, and security rules.
