@@ -5,6 +5,7 @@ import { resolveEnv } from "./resolve";
 import { runEncrypt, runDecrypt, runKeys } from "./vault";
 import { run } from "./run";
 import { edit_set, edit_delete, edit_list } from "./edit";
+import { diff_env, format_diff } from "./diff";
 import { print_output } from "./output";
 
 const VERSION = "1.0.0";
@@ -41,6 +42,14 @@ async function main(): Promise<void> {
   // edit command
   if (args.command === "edit") {
     await handleEdit(args);
+    process.exit(0);
+  }
+
+  // diff command
+  if (args.command === "diff") {
+    const keys_only = !!args.flags["keys-only"];
+    const result = await diff_env(args.env, keys_only);
+    print_output(result, args.json, format_diff);
     process.exit(0);
   }
 
