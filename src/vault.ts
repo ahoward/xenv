@@ -114,7 +114,7 @@ function generateKey(): string {
  * Encrypt plaintext with AES-256-GCM.
  * Returns: iv (12 bytes) + tag (16 bytes) + ciphertext, hex-encoded.
  */
-async function encrypt(plaintext: string, keyHex: string): Promise<string> {
+export async function encrypt_content(plaintext: string, keyHex: string): Promise<string> {
   const key = Buffer.from(keyHex, "hex");
   if (key.length !== KEY_LENGTH) {
     throw new Error(`invalid key length: expected ${KEY_LENGTH * 2} hex chars`);
@@ -213,7 +213,7 @@ export async function runEncrypt(env: string): Promise<void> {
   }
 
   const plaintext = await Bun.file(sourcePath).text();
-  const encrypted = await encrypt(plaintext, key);
+  const encrypted = await encrypt_content(plaintext, key);
   const outPath = join(cwd, `.xenv.${env}.enc`);
 
   await Bun.write(outPath, encrypted + "\n");
