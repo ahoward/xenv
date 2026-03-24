@@ -60,19 +60,12 @@ xenv inherits stdin, stdout, stderr. signals (SIGINT, SIGTERM, SIGHUP) forward t
 ### manage encrypted vaults
 
 ```bash
-# generate a key
-xenv keys @production
-# => export XENV_KEY_PRODUCTION="a]4f...64 hex chars..."
-
-# encrypt .xenv.production → .xenv.production.enc
-export XENV_KEY_PRODUCTION="a4f..."
-xenv encrypt @production
-
-# decrypt .xenv.production.enc → .xenv.production
-xenv decrypt @production
+xenv keys    @production    # generate a 256-bit key (prints to stdout)
+xenv encrypt @production    # .xenv.production → .xenv.production.enc
+xenv decrypt @production    # .xenv.production.enc → .xenv.production
 ```
 
-commit the `.enc` file. gitignore the plaintext. set `XENV_KEY_PRODUCTION` in your CI dashboard. that's your entire secrets pipeline.
+all three commands read the key from a single env var: `XENV_KEY_PRODUCTION`. see [encryption](#encryption) for the full walkthrough.
 
 ---
 
@@ -134,23 +127,122 @@ deterministic. debuggable. no surprises.
 
 ## encryption
 
-AES-256-GCM. authenticated encryption. the standard that TLS, SSH, and every serious system uses.
+one key per environment. the key is a 64-character hex string (256 bits). xenv uses it for both encryption and decryption (AES-256-GCM, authenticated symmetric encryption). there are no public/private keypairs. no keyfiles on disk. no KMS.
 
-- **encrypt:** `xenv encrypt @production` reads `.xenv.production`, encrypts to `.xenv.production.enc`
-- **decrypt:** `xenv decrypt @production` reverses it
-- **keys:** `xenv keys @production` generates a 256-bit key
-- **at runtime:** xenv detects `XENV_KEY_PRODUCTION` in the environment, decrypts the vault in memory, merges it into the cascade, passes it to the child process. decrypted secrets are never written to disk.
+### the key naming convention
 
-### why symmetric (AES-256-GCM) instead of asymmetric (ECIES/RSA)?
+the key for any environment is always:
 
-dotenvx uses ECIES (secp256k1 + AES-256-GCM + HKDF). that's clever — you can encrypt without the private key. but for env secrets:
+```
+XENV_KEY_{ENV_NAME_UPPERCASED}
+```
+
+| you type | xenv looks for |
+|---|---|
+| `@production` | `XENV_KEY_PRODUCTION` |
+| `@staging` | `XENV_KEY_STAGING` |
+| `@ci` | `XENV_KEY_CI` |
+
+xenv reads this from `process.env` — your shell, your CI dashboard, your Docker `-e` flag. wherever you'd normally set an env var. xenv never stores the key itself.
+
+### full walkthrough: from plaintext to production
+
+**step 1: write your secrets in plaintext.**
+
+```bash
+# .xenv.production (this file will be gitignored)
+DATABASE_URL="postgres://prod:secret@db.internal:5432/app"
+STRIPE_KEY="sk_live_abc123"
+```
+
+**step 2: generate a key.**
+
+```bash
+$ xenv keys @production
+# add this to your shell profile or CI secrets:
+export XENV_KEY_PRODUCTION="9a3f...64 hex chars..."
+```
+
+this prints to stdout. copy it. xenv does not save it anywhere.
+
+**step 3: put the key in your shell.**
+
+```bash
+export XENV_KEY_PRODUCTION="9a3f..."
+```
+
+**step 4: encrypt.**
+
+```bash
+$ xenv encrypt @production
+encrypted .xenv.production → .xenv.production.enc
+```
+
+this reads `XENV_KEY_PRODUCTION` from your shell environment, encrypts `.xenv.production`, and writes `.xenv.production.enc`. the `.enc` file is safe to commit — it's a blob of hex.
+
+**step 5: commit the vault, gitignore the plaintext.**
+
+```bash
+git add .xenv.production.enc
+echo ".xenv.production" >> .gitignore
+git commit -m "add production vault"
+```
+
+**step 6: set the key in CI/production.**
+
+in GitHub Actions:
+```yaml
+env:
+  XENV_KEY_PRODUCTION: ${{ secrets.XENV_KEY_PRODUCTION }}
+```
+
+in Docker:
+```bash
+docker run -e XENV_KEY_PRODUCTION="9a3f..." myapp
+```
+
+in Heroku/Vercel/Fly/etc: add `XENV_KEY_PRODUCTION` to the platform's env var dashboard.
+
+**step 7: run.** xenv does the rest automatically.
+
+```bash
+xenv @production -- ./server
+```
+
+here's what happens:
+1. xenv sees `@production`, resolves the file cascade
+2. finds `.xenv.production.enc` at cascade layer 5
+3. checks `process.env` for `XENV_KEY_PRODUCTION`
+4. decrypts the vault in memory (never written to disk)
+5. merges the decrypted vars into the cascade
+6. spawns `./server` with the final merged environment
+7. if the key is missing, xenv warns to stderr and skips the vault
+
+**that's it.** the key is the only secret you need to manage. one env var per environment. everything else is committed.
+
+### editing encrypted secrets
+
+```bash
+# decrypt the vault to plaintext for editing
+xenv decrypt @production
+
+# edit .xenv.production in your editor
+vim .xenv.production
+
+# re-encrypt
+xenv encrypt @production
+```
+
+### why symmetric instead of asymmetric?
+
+dotenvx uses ECIES (secp256k1 + AES-256-GCM + HKDF) — asymmetric crypto where anyone with the public key can encrypt but only the private key holder can decrypt. that's clever for some workflows. but for env secrets:
 
 - you already control who can encrypt (they have repo access)
 - you already control who can decrypt (they have CI access)
-- symmetric is faster, simpler, and has half the key management
+- symmetric means one key, not two. half the management, half the surface area
 - ECIES adds a public/private keypair dance that buys nothing when the threat model is "don't commit plaintext secrets"
 
-one key per environment. one env var in CI. done.
+one key. one env var. done.
 
 ---
 
@@ -202,19 +294,18 @@ your-project/
 
 ## ci/cd
 
-### GitHub Actions
+set `XENV_KEY_{ENV}` in your platform's secret store. xenv reads it from the process environment at runtime. that's the only setup.
 
 ```yaml
+# GitHub Actions
 env:
   XENV_KEY_PRODUCTION: ${{ secrets.XENV_KEY_PRODUCTION }}
-
 steps:
   - run: xenv @production -- ./deploy.sh
 ```
 
-### Docker
-
 ```dockerfile
+# Docker — one binary, no runtime dependencies
 FROM alpine:latest
 COPY xenv /usr/local/bin/
 COPY . /app
@@ -222,7 +313,11 @@ WORKDIR /app
 CMD ["xenv", "@production", "--", "./server"]
 ```
 
-one binary. no `apt-get install nodejs`. no `pip install`. no `gem install`.
+```bash
+# any platform that supports env vars
+heroku config:set XENV_KEY_PRODUCTION="9a3f..."
+fly secrets set XENV_KEY_PRODUCTION="9a3f..."
+```
 
 ---
 
