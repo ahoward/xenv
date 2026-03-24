@@ -1,7 +1,7 @@
 import { existsSync } from "fs";
 import { join } from "path";
 import { parseEnvContent } from "./parse";
-import { decryptVault } from "./vault";
+import { decryptVault, resolveKey, keyEnvNames } from "./vault";
 
 /**
  * Resolve environment variables via the cascade:
@@ -53,14 +53,13 @@ export async function resolveEnv(
   // 5. encrypted vault
   const encPath = join(cwd, `.xenv.${env}.enc`);
   if (existsSync(encPath)) {
-    const keyEnvName = `XENV_KEY_${env.toUpperCase()}`;
-    const key = process.env[keyEnvName];
+    const key = resolveKey(env);
     if (key) {
       const decrypted = await decryptVault(encPath, key);
       const parsed = parseEnvContent(decrypted);
       Object.assign(merged, parsed);
     } else {
-      console.error(`xenv: warning: vault .xenv.${env}.enc exists but ${keyEnvName} is not set — skipping`);
+      console.error(`xenv: warning: vault .xenv.${env}.enc exists but ${keyEnvNames(env)} is not set — skipping`);
     }
   }
 

@@ -9,6 +9,23 @@ const TAG_LENGTH = 16; // 128-bit auth tag
 const KEY_LENGTH = 32; // 256-bit key
 
 /**
+ * Resolve the encryption key for an environment.
+ * Checks XENV_KEY_{ENV} first, then falls back to XENV_KEY.
+ */
+export function resolveKey(env: string): string | undefined {
+  const specific = `XENV_KEY_${env.toUpperCase()}`;
+  return process.env[specific] || process.env.XENV_KEY;
+}
+
+/**
+ * Return the env var name that would be checked for a given environment.
+ * Used in error messages.
+ */
+export function keyEnvNames(env: string): string {
+  return `XENV_KEY_${env.toUpperCase()} or XENV_KEY`;
+}
+
+/**
  * Generate a cryptographically secure hex key.
  */
 function generateKey(): string {
@@ -110,11 +127,10 @@ export async function runEncrypt(env: string): Promise<void> {
     throw new Error(`source file not found: .xenv.${env}`);
   }
 
-  const keyEnvName = `XENV_KEY_${env.toUpperCase()}`;
-  const key = process.env[keyEnvName];
+  const key = resolveKey(env);
   if (!key) {
     throw new Error(
-      `encryption key not found in environment: ${keyEnvName}\n` +
+      `encryption key not found in environment: ${keyEnvNames(env)}\n` +
       `run 'xenv keys @${env}' to generate one`
     );
   }
@@ -138,11 +154,10 @@ export async function runDecrypt(env: string): Promise<void> {
     throw new Error(`vault not found: .xenv.${env}.enc`);
   }
 
-  const keyEnvName = `XENV_KEY_${env.toUpperCase()}`;
-  const key = process.env[keyEnvName];
+  const key = resolveKey(env);
   if (!key) {
     throw new Error(
-      `decryption key not found in environment: ${keyEnvName}`
+      `decryption key not found in environment: ${keyEnvNames(env)}`
     );
   }
 

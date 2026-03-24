@@ -129,21 +129,41 @@ deterministic. debuggable. no surprises.
 
 one key per environment. the key is a 64-character hex string (256 bits). xenv uses it for both encryption and decryption (AES-256-GCM, authenticated symmetric encryption). there are no public/private keypairs. no keyfiles on disk. no KMS.
 
-### the key naming convention
+### key lookup
 
-the key for any environment is always:
+xenv checks two env vars, in order:
 
+| priority | env var | purpose |
+|---|---|---|
+| 1 | `XENV_KEY_{ENV}` | per-environment key (e.g. `XENV_KEY_PRODUCTION`) |
+| 2 | `XENV_KEY` | global fallback — one key for everything |
+
+the first one found wins.
+
+**use one key (simple).** set `XENV_KEY` once. it works for every environment — production, staging, dev. this is fine for solo devs and small teams where the threat model is "don't commit plaintext."
+
+```bash
+export XENV_KEY="9a3f...64 hex chars..."
+xenv encrypt @production    # uses XENV_KEY
+xenv encrypt @staging       # uses XENV_KEY
+xenv @production -- ./server # uses XENV_KEY
 ```
-XENV_KEY_{ENV_NAME_UPPERCASED}
+
+**use per-env keys (isolation).** set `XENV_KEY_PRODUCTION`, `XENV_KEY_STAGING`, etc. a compromised staging key can't decrypt production secrets.
+
+```bash
+export XENV_KEY_PRODUCTION="9a3f..."
+export XENV_KEY_STAGING="b7c1..."
 ```
 
-| you type | xenv looks for |
-|---|---|
-| `@production` | `XENV_KEY_PRODUCTION` |
-| `@staging` | `XENV_KEY_STAGING` |
-| `@ci` | `XENV_KEY_CI` |
+**mix both.** set `XENV_KEY` as a default and override specific environments:
 
-xenv reads this from `process.env` — your shell, your CI dashboard, your Docker `-e` flag. wherever you'd normally set an env var. xenv never stores the key itself.
+```bash
+export XENV_KEY="9a3f..."              # default for most envs
+export XENV_KEY_PRODUCTION="b7c1..."   # production gets its own key
+```
+
+xenv reads keys from `process.env` — your shell, your CI dashboard, your Docker `-e` flag. wherever you'd normally set an env var. xenv never stores the key itself.
 
 ### full walkthrough: from plaintext to production
 
@@ -168,7 +188,11 @@ this prints to stdout. copy it. xenv does not save it anywhere.
 **step 3: put the key in your shell.**
 
 ```bash
+# either a per-env key:
 export XENV_KEY_PRODUCTION="9a3f..."
+
+# or a single global key for all environments:
+export XENV_KEY="9a3f..."
 ```
 
 **step 4: encrypt.**
@@ -212,7 +236,7 @@ xenv @production -- ./server
 here's what happens:
 1. xenv sees `@production`, resolves the file cascade
 2. finds `.xenv.production.enc` at cascade layer 5
-3. checks `process.env` for `XENV_KEY_PRODUCTION`
+3. checks `process.env` for `XENV_KEY_PRODUCTION`, then falls back to `XENV_KEY`
 4. decrypts the vault in memory (never written to disk)
 5. merges the decrypted vars into the cascade
 6. spawns `./server` with the final merged environment
@@ -242,7 +266,7 @@ dotenvx uses ECIES (secp256k1 + AES-256-GCM + HKDF) — asymmetric crypto where 
 - symmetric means one key, not two. half the management, half the surface area
 - ECIES adds a public/private keypair dance that buys nothing when the threat model is "don't commit plaintext secrets"
 
-one key. one env var. done.
+one key per environment — or one key for everything. your call.
 
 ---
 
@@ -258,7 +282,7 @@ one key. one env var. done.
 | **file extension** | `.xenv` (platform-safe) | `.env` (collides) | `.senv/` directory | `.envrc` | `.env` | none (cloud) |
 | **cascade layers** | 7 | 2-4 (convention flag) | merge order | 1 | 4 (Ruby) / 1 (Node) | 3 |
 | **zero-disk secrets** | yes | yes | yes | n/a | n/a | yes |
-| **key management** | `XENV_KEY_{ENV}` | `.env.keys` + `DOTENV_PRIVATE_KEY_{ENV}` | `.senv/.key` | n/a | n/a | 1Password account |
+| **key management** | `XENV_KEY_{ENV}` or `XENV_KEY` | `.env.keys` + `DOTENV_PRIVATE_KEY_{ENV}` | `.senv/.key` | n/a | n/a | 1Password account |
 | **platforms** | linux, mac, windows | linux, mac, windows | anywhere Ruby runs | linux, mac | anywhere | linux, mac, windows |
 | **signal forwarding** | yes | partial (open issues) | yes | n/a | n/a | yes |
 | **cost** | free | free | free | free | free | $4+/user/mo |
@@ -294,7 +318,7 @@ your-project/
 
 ## ci/cd
 
-set `XENV_KEY_{ENV}` in your platform's secret store. xenv reads it from the process environment at runtime. that's the only setup.
+set `XENV_KEY_{ENV}` (or just `XENV_KEY` for all environments) in your platform's secret store. xenv reads it from the process environment at runtime. that's the only setup.
 
 ```yaml
 # GitHub Actions
