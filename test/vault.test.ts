@@ -180,19 +180,101 @@ describe("vault", () => {
     expect(runEncrypt("nokey")).rejects.toThrow("encryption key not found");
   });
 
-  test("keys generates valid hex key", async () => {
-    // capture console output
-    const lines: string[] = [];
-    const origLog = console.log;
-    console.log = (...args: any[]) => lines.push(args.join(" "));
-
+  test("keys writes key to .xenv.keys file", async () => {
     await runKeys("production");
 
-    console.log = origLog;
-    const output = lines.join("\n");
-    expect(output).toContain("XENV_KEY_PRODUCTION");
-    // key should be 64 hex chars (32 bytes)
-    const match = output.match(/"([a-f0-9]{64})"/);
+    const keysPath = join(dir, ".xenv.keys");
+    expect(existsSync(keysPath)).toBe(true);
+
+    const content = readFileSync(keysPath, "utf-8");
+    expect(content).toContain("XENV_KEY_PRODUCTION=");
+    expect(content).toContain("DO NOT COMMIT");
+
+    // key should be 64 hex chars in the file
+    const match = content.match(/XENV_KEY_PRODUCTION="([a-f0-9]{64})"/);
     expect(match).not.toBeNull();
+
+    // file should be mode 600
+    const { statSync } = require("fs");
+    const mode = statSync(keysPath).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+
+  test("keys replaces existing key for same env", async () => {
+    await runKeys("staging");
+    const first = readFileSync(join(dir, ".xenv.keys"), "utf-8");
+    const firstMatch = first.match(/XENV_KEY_STAGING="([a-f0-9]{64})"/);
+
+    await runKeys("staging");
+    const second = readFileSync(join(dir, ".xenv.keys"), "utf-8");
+    const secondMatch = second.match(/XENV_KEY_STAGING="([a-f0-9]{64})"/);
+
+    // key was regenerated (different value)
+    expect(firstMatch![1]).not.toBe(secondMatch![1]);
+    // only one XENV_KEY_STAGING line in the file
+    const count = (second.match(/XENV_KEY_STAGING/g) || []).length;
+    expect(count).toBe(1);
+  });
+
+  test("keys appends multiple envs to same file", async () => {
+    await runKeys("production");
+    await runKeys("staging");
+
+    const content = readFileSync(join(dir, ".xenv.keys"), "utf-8");
+    expect(content).toContain("XENV_KEY_PRODUCTION=");
+    expect(content).toContain("XENV_KEY_STAGING=");
+  });
+
+  test("resolveKey reads from .xenv.keys file", async () => {
+    delete process.env.XENV_KEY_FILETEST;
+    delete process.env.XENV_KEY;
+
+    // write a key directly to .xenv.keys
+    const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex");
+    writeFileSync(join(dir, ".xenv.keys"), `XENV_KEY_FILETEST="${key}"\n`);
+
+    expect(resolveKey("filetest", dir)).toBe(key);
+  });
+
+  test("resolveKey reads XENV_KEY fallback from .xenv.keys", async () => {
+    delete process.env.XENV_KEY_SOMETHING;
+    delete process.env.XENV_KEY;
+
+    const key = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex");
+    writeFileSync(join(dir, ".xenv.keys"), `XENV_KEY="${key}"\n`);
+
+    expect(resolveKey("something", dir)).toBe(key);
+  });
+
+  test("process.env key takes precedence over .xenv.keys", async () => {
+    const envKey = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex");
+    const fileKey = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex");
+
+    process.env.XENV_KEY_PREC = envKey;
+    writeFileSync(join(dir, ".xenv.keys"), `XENV_KEY_PREC="${fileKey}"\n`);
+
+    expect(resolveKey("prec", dir)).toBe(envKey);
+
+    delete process.env.XENV_KEY_PREC;
+  });
+
+  test("encrypt/decrypt roundtrip using .xenv.keys", async () => {
+    delete process.env.XENV_KEY_ROUNDTRIP;
+    delete process.env.XENV_KEY;
+
+    // generate key into .xenv.keys
+    await runKeys("roundtrip");
+
+    // write plaintext
+    writeFileSync(join(dir, ".xenv.roundtrip"), "SECRET=fromfile");
+
+    // encrypt should find the key in .xenv.keys
+    await runEncrypt("roundtrip");
+    expect(existsSync(join(dir, ".xenv.roundtrip.enc"))).toBe(true);
+
+    // remove plaintext, decrypt should also find the key
+    rmSync(join(dir, ".xenv.roundtrip"));
+    await runDecrypt("roundtrip");
+    expect(readFileSync(join(dir, ".xenv.roundtrip"), "utf-8")).toBe("SECRET=fromfile");
   });
 });

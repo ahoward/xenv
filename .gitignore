@@ -5,6 +5,7 @@ bny/children/
 
 # secrets
 .envrc
+.xenv.keys
 .env*.local
 .xenv*.local
 .xenv.production

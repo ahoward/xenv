@@ -1,4 +1,4 @@
-import { existsSync } from "fs";
+import { existsSync, chmodSync, readFileSync } from "fs";
 import { join } from "path";
 import { parseEnvContent } from "./parse";
 
@@ -7,22 +7,47 @@ const VAULT_HEADER = `xenv:v${VAULT_VERSION}:`;
 const IV_LENGTH = 12; // 96-bit IV for GCM
 const TAG_LENGTH = 16; // 128-bit auth tag
 const KEY_LENGTH = 32; // 256-bit key
+const KEYS_FILE = ".xenv.keys";
 
 /**
- * Resolve the encryption key for an environment.
- * Checks XENV_KEY_{ENV} first, then falls back to XENV_KEY.
+ * Read keys from the project-local .xenv.keys file.
+ * Returns a parsed key-value map, or empty if the file doesn't exist.
  */
-export function resolveKey(env: string): string | undefined {
-  const specific = `XENV_KEY_${env.toUpperCase()}`;
-  return process.env[specific] || process.env.XENV_KEY;
+function readKeysFile(cwd: string = process.cwd()): Record<string, string> {
+  const path = join(cwd, KEYS_FILE);
+  if (!existsSync(path)) return {};
+  return parseEnvContent(readFileSync(path, "utf-8"));
 }
 
 /**
- * Return the env var name that would be checked for a given environment.
- * Used in error messages.
+ * Resolve the encryption key for an environment.
+ *
+ * Lookup order:
+ *   1. XENV_KEY_{ENV} in process.env
+ *   2. XENV_KEY in process.env
+ *   3. XENV_KEY_{ENV} in .xenv.keys
+ *   4. XENV_KEY in .xenv.keys
+ */
+export function resolveKey(env: string, cwd?: string): string | undefined {
+  const specific = `XENV_KEY_${env.toUpperCase()}`;
+
+  // 1-2: check process.env
+  if (process.env[specific]) return process.env[specific];
+  if (process.env.XENV_KEY) return process.env.XENV_KEY;
+
+  // 3-4: check .xenv.keys file
+  const fileKeys = readKeysFile(cwd);
+  if (fileKeys[specific]) return fileKeys[specific];
+  if (fileKeys.XENV_KEY) return fileKeys.XENV_KEY;
+
+  return undefined;
+}
+
+/**
+ * Return a description of where keys are looked up. Used in error messages.
  */
 export function keyEnvNames(env: string): string {
-  return `XENV_KEY_${env.toUpperCase()} or XENV_KEY`;
+  return `XENV_KEY_${env.toUpperCase()} or XENV_KEY (in env or .xenv.keys)`;
 }
 
 /**
@@ -170,9 +195,55 @@ export async function runDecrypt(env: string): Promise<void> {
 
 /**
  * CLI: xenv keys @env
+ *
+ * Generates a key and writes it to .xenv.keys in the project directory.
+ * Creates the file with mode 600 if it doesn't exist.
+ * If a key for this env already exists in the file, it is replaced.
  */
 export async function runKeys(env: string): Promise<void> {
+  const cwd = process.cwd();
+  const keysPath = join(cwd, KEYS_FILE);
+  const keyName = `XENV_KEY_${env.toUpperCase()}`;
   const key = generateKey();
-  const keyEnvName = `XENV_KEY_${env.toUpperCase()}`;
-  console.log(`# add this to your shell profile or CI secrets:\nexport ${keyEnvName}="${key}"`);
+
+  // read existing keys file content (or start fresh)
+  let lines: string[] = [];
+  if (existsSync(keysPath)) {
+    lines = readFileSync(keysPath, "utf-8").split("\n");
+  }
+
+  // replace existing key line or append
+  const prefix = `${keyName}=`;
+  const newLine = `${keyName}="${key}"`;
+  let replaced = false;
+
+  lines = lines.map((line) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith(prefix) || trimmed.startsWith(`export ${prefix}`)) {
+      replaced = true;
+      return newLine;
+    }
+    return line;
+  });
+
+  if (!replaced) {
+    // add a header comment if this is a new file
+    if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) {
+      lines = [
+        "# xenv keys — DO NOT COMMIT THIS FILE",
+        "# add .xenv.keys to your .gitignore",
+        "",
+      ];
+    }
+    lines.push(newLine);
+  }
+
+  // ensure file ends with newline
+  const content = lines.join("\n").trimEnd() + "\n";
+  await Bun.write(keysPath, content);
+  chmodSync(keysPath, 0o600);
+
+  console.log(`${keyName} → .xenv.keys`);
+  console.log(`\nfor CI, set this secret:`);
+  console.log(`  ${keyName}="${key}"`);
 }

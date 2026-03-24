@@ -127,43 +127,73 @@ deterministic. debuggable. no surprises.
 
 ## encryption
 
-one key per environment. the key is a 64-character hex string (256 bits). xenv uses it for both encryption and decryption (AES-256-GCM, authenticated symmetric encryption). there are no public/private keypairs. no keyfiles on disk. no KMS.
+each key is a 64-character hex string (256 bits). xenv uses it for both encryption and decryption (AES-256-GCM, authenticated symmetric encryption). there are no public/private keypairs. no KMS.
 
 ### key lookup
 
-xenv checks two env vars, in order:
+xenv looks for keys in this order. first match wins.
 
-| priority | env var | purpose |
+| priority | source | example |
 |---|---|---|
-| 1 | `XENV_KEY_{ENV}` | per-environment key (e.g. `XENV_KEY_PRODUCTION`) |
-| 2 | `XENV_KEY` | global fallback — one key for everything |
+| 1 | `XENV_KEY_{ENV}` in process env | `XENV_KEY_PRODUCTION` set in shell/CI |
+| 2 | `XENV_KEY` in process env | `XENV_KEY` set in shell/CI |
+| 3 | `XENV_KEY_{ENV}` in `.xenv.keys` | written by `xenv keys @production` |
+| 4 | `XENV_KEY` in `.xenv.keys` | a single key in the keyfile |
 
-the first one found wins.
+### `.xenv.keys` — the project keyfile
 
-**use one key (simple).** set `XENV_KEY` once. it works for every environment — production, staging, dev. this is fine for solo devs and small teams where the threat model is "don't commit plaintext."
-
-```bash
-export XENV_KEY="9a3f...64 hex chars..."
-xenv encrypt @production    # uses XENV_KEY
-xenv encrypt @staging       # uses XENV_KEY
-xenv @production -- ./server # uses XENV_KEY
-```
-
-**use per-env keys (isolation).** set `XENV_KEY_PRODUCTION`, `XENV_KEY_STAGING`, etc. a compromised staging key can't decrypt production secrets.
+`xenv keys @production` generates a key and writes it to `.xenv.keys` in your project root:
 
 ```bash
-export XENV_KEY_PRODUCTION="9a3f..."
-export XENV_KEY_STAGING="b7c1..."
+$ xenv keys @production
+XENV_KEY_PRODUCTION → .xenv.keys
+
+for CI, set this secret:
+  XENV_KEY_PRODUCTION="9a3f...64 hex chars..."
 ```
 
-**mix both.** set `XENV_KEY` as a default and override specific environments:
+the file looks like this:
 
 ```bash
-export XENV_KEY="9a3f..."              # default for most envs
-export XENV_KEY_PRODUCTION="b7c1..."   # production gets its own key
+# .xenv.keys — DO NOT COMMIT THIS FILE
+# add .xenv.keys to your .gitignore
+XENV_KEY_PRODUCTION="9a3f..."
+XENV_KEY_STAGING="b7c1..."
 ```
 
-xenv reads keys from `process.env` — your shell, your CI dashboard, your Docker `-e` flag. wherever you'd normally set an env var. xenv never stores the key itself.
+- created with `chmod 600` (owner read/write only)
+- **must be in `.gitignore`** — this file contains your plaintext keys
+- xenv reads it automatically during encrypt, decrypt, and run
+- process env vars always take precedence (for CI/Docker overrides)
+
+for local development, this is all you need. run `xenv keys`, then `xenv encrypt`, then `xenv @env -- cmd`. no exporting env vars. no copy-pasting. the keyfile just works.
+
+for CI/production, copy the key value into your platform's secret store as an env var. the keyfile doesn't need to exist there — the env var takes precedence.
+
+### one key or many?
+
+**one key for everything (simple).** use a single `XENV_KEY` in your keyfile or env. it works for every environment. this is fine when the threat model is "don't commit plaintext."
+
+```bash
+# .xenv.keys
+XENV_KEY="9a3f..."
+```
+
+**per-env keys (isolation).** a compromised staging key can't decrypt production secrets.
+
+```bash
+# .xenv.keys (written automatically by xenv keys)
+XENV_KEY_PRODUCTION="9a3f..."
+XENV_KEY_STAGING="b7c1..."
+```
+
+**mix both.** `XENV_KEY` as a default, override specific environments:
+
+```bash
+# .xenv.keys
+XENV_KEY="9a3f..."
+XENV_KEY_PRODUCTION="b7c1..."
+```
 
 ### full walkthrough: from plaintext to production
 
@@ -179,40 +209,35 @@ STRIPE_KEY="sk_live_abc123"
 
 ```bash
 $ xenv keys @production
-# add this to your shell profile or CI secrets:
-export XENV_KEY_PRODUCTION="9a3f...64 hex chars..."
+XENV_KEY_PRODUCTION → .xenv.keys
+
+for CI, set this secret:
+  XENV_KEY_PRODUCTION="9a3f..."
 ```
 
-this prints to stdout. copy it. xenv does not save it anywhere.
+the key is saved to `.xenv.keys` in your project. for CI, copy the value shown.
 
-**step 3: put the key in your shell.**
-
-```bash
-# either a per-env key:
-export XENV_KEY_PRODUCTION="9a3f..."
-
-# or a single global key for all environments:
-export XENV_KEY="9a3f..."
-```
-
-**step 4: encrypt.**
+**step 3: encrypt.**
 
 ```bash
 $ xenv encrypt @production
 encrypted .xenv.production → .xenv.production.enc
 ```
 
-this reads `XENV_KEY_PRODUCTION` from your shell environment, encrypts `.xenv.production`, and writes `.xenv.production.enc`. the `.enc` file is safe to commit — it's a blob of hex.
+xenv finds the key in `.xenv.keys`, encrypts `.xenv.production`, writes `.xenv.production.enc`. the `.enc` file is safe to commit — it's a blob of hex.
 
-**step 5: commit the vault, gitignore the plaintext.**
+**step 4: commit the vault, gitignore the rest.**
 
 ```bash
-git add .xenv.production.enc
+# make sure secrets and keyfile are never committed
+echo ".xenv.keys" >> .gitignore
 echo ".xenv.production" >> .gitignore
+
+git add .xenv.production.enc .gitignore
 git commit -m "add production vault"
 ```
 
-**step 6: set the key in CI/production.**
+**step 5: set the key in CI/production.**
 
 in GitHub Actions:
 ```yaml
@@ -227,7 +252,7 @@ docker run -e XENV_KEY_PRODUCTION="9a3f..." myapp
 
 in Heroku/Vercel/Fly/etc: add `XENV_KEY_PRODUCTION` to the platform's env var dashboard.
 
-**step 7: run.** xenv does the rest automatically.
+**step 6: run.** xenv does the rest automatically.
 
 ```bash
 xenv @production -- ./server
@@ -236,13 +261,13 @@ xenv @production -- ./server
 here's what happens:
 1. xenv sees `@production`, resolves the file cascade
 2. finds `.xenv.production.enc` at cascade layer 5
-3. checks `process.env` for `XENV_KEY_PRODUCTION`, then falls back to `XENV_KEY`
+3. looks for the key: env var `XENV_KEY_PRODUCTION` → env var `XENV_KEY` → `.xenv.keys` file
 4. decrypts the vault in memory (never written to disk)
 5. merges the decrypted vars into the cascade
 6. spawns `./server` with the final merged environment
 7. if the key is missing, xenv warns to stderr and skips the vault
 
-**that's it.** the key is the only secret you need to manage. one env var per environment. everything else is committed.
+**that's it.** locally, `.xenv.keys` handles everything. in CI, one env var per environment. the plaintext keyfile never leaves your machine.
 
 ### editing encrypted secrets
 
@@ -293,6 +318,7 @@ one key per environment — or one key for everything. your call.
 
 ```
 your-project/
+├── .xenv.keys                  # encryption keys (gitignored, chmod 600)
 ├── .env                        # legacy base defaults (committed)
 ├── .xenv                       # modern base defaults (committed)
 ├── .xenv.production            # prod plaintext (gitignored)
@@ -306,6 +332,7 @@ your-project/
 
 **.gitignore:**
 ```
+.xenv.keys
 .xenv.*.local
 .env.*.local
 .env.local
