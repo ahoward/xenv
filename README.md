@@ -60,12 +60,29 @@ xenv inherits stdin, stdout, stderr. signals (SIGINT, SIGTERM, SIGHUP) forward t
 ### manage encrypted vaults
 
 ```bash
-xenv keys    @production    # generate a 256-bit key (prints to stdout)
+xenv keys    @production    # generate a 256-bit key (saves to .xenv.keys)
 xenv encrypt @production    # .xenv.production → .xenv.production.enc
 xenv decrypt @production    # .xenv.production.enc → .xenv.production
 ```
 
-all three commands read the key from a single env var: `XENV_KEY_PRODUCTION`. see [encryption](#encryption) for the full walkthrough.
+### edit secrets without decrypting to disk
+
+```bash
+xenv edit @production set API_KEY=sk_live_...   # atomic set
+xenv edit @production delete OLD_KEY            # atomic delete
+xenv edit @production list                      # key names only
+```
+
+### inspect and validate
+
+```bash
+xenv resolve  @production --json                # dump merged cascade
+xenv diff     @production --keys-only           # what changed?
+xenv validate @production --require DB_URL      # pre-flight check
+xenv audit                                      # security scan
+```
+
+all commands support `--json` for machine-readable output. see [agent tools](#agent-tools) for the full story.
 
 ---
 
@@ -296,16 +313,28 @@ here's what happens:
 
 ### editing encrypted secrets
 
+**option A: atomic edit (recommended for scripts and AI agents).**
+
 ```bash
-# decrypt the vault to plaintext for editing
+# set a secret — decrypts in memory, patches, re-encrypts. plaintext never touches disk.
+xenv edit @production set DATABASE_URL="postgres://prod:new@db:5432/app"
+
+# remove a secret
+xenv edit @production delete OLD_KEY
+
+# list key names (no values exposed)
+xenv edit @production list
+```
+
+**option B: decrypt-edit-encrypt cycle.**
+
+```bash
 xenv decrypt @production
-
-# edit .xenv.production in your editor
 vim .xenv.production
-
-# re-encrypt
 xenv encrypt @production
 ```
+
+option A is safer — the plaintext never exists as a file. option B is easier when you need to edit many keys at once.
 
 ### why symmetric instead of asymmetric?
 
@@ -335,6 +364,9 @@ one key per environment — or one key for everything. your call.
 | **key management** | `XENV_KEY_{ENV}` or `XENV_KEY` | `.env.keys` + `DOTENV_PRIVATE_KEY_{ENV}` | `.senv/.key` | n/a | n/a | 1Password account |
 | **platforms** | linux, mac, windows | linux, mac, windows | anywhere Ruby runs | linux, mac | anywhere | linux, mac, windows |
 | **signal forwarding** | yes | partial (open issues) | yes | n/a | n/a | yes |
+| **AI agent support** | MCP server + `--json` | none | none | none | none | none |
+| **atomic secret edit** | `edit set` (zero-disk) | none | none | none | none | none |
+| **security audit** | `xenv audit` | none | none | none | none | none |
 | **cost** | free | free | free | free | free | $4+/user/mo |
 
 ---
@@ -394,6 +426,111 @@ CMD ["xenv", "@production", "--", "./server"]
 heroku config:set XENV_KEY_PRODUCTION="9a3f..."
 fly secrets set XENV_KEY_PRODUCTION="9a3f..."
 ```
+
+---
+
+## agent tools
+
+xenv is built for AI coding agents. every command supports `--json` for machine-readable output. but the real integration is the MCP server.
+
+### `xenv mcp` — model context protocol server
+
+```bash
+# register with Claude Code
+claude mcp add xenv -- xenv mcp
+```
+
+```json
+// or add to Claude Desktop's claude_desktop_config.json
+{
+  "mcpServers": {
+    "xenv": {
+      "command": "xenv",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+this gives any MCP-compatible AI tool (Claude Code, Cursor, etc.) native access to 7 tools:
+
+| tool | what it does |
+|------|-------------|
+| `resolve_env` | resolve the full 7-layer cascade, return merged vars as JSON |
+| `set_secret` | atomic: decrypt vault in memory → set key → re-encrypt (plaintext never touches disk) |
+| `delete_secret` | atomic: decrypt → remove key → re-encrypt |
+| `list_secrets` | list key names from a vault (no values exposed) |
+| `rotate_key` | generate new key, re-encrypt vault, update `.xenv.keys` |
+| `audit` | scan project for security mistakes |
+| `validate` | check environment for missing keys, empty secrets, vault issues |
+
+the server speaks JSON-RPC 2.0 over stdio. zero dependencies. no SDK required.
+
+when an AI agent needs to rotate a production key, it calls one tool — not three shell commands. when it needs to add a secret, the plaintext never exists as a file for it to accidentally `git add`.
+
+### `xenv resolve` — dump the cascade
+
+```bash
+# human-readable
+xenv resolve @production
+
+# JSON — what agents want
+xenv resolve @production --json
+```
+
+returns the final merged environment after all 7 cascade layers. useful for debugging "where did this value come from?" and for agents that need to inspect the environment before running.
+
+### `xenv diff` — compare plaintext vs vault
+
+```bash
+# full diff
+xenv diff @production
+
+# key names only (safe for logs and CI output)
+xenv diff @production --keys-only
+
+# structured JSON
+xenv diff @production --json
+```
+
+compares the plaintext `.xenv.{env}` file against the decrypted `.xenv.{env}.enc` vault. shows added, removed, and changed keys. the `--keys-only` flag strips values so it's safe to print in CI logs.
+
+### `xenv validate` — pre-flight checks
+
+```bash
+# check for common problems
+xenv validate @production
+
+# assert specific keys exist (exits 1 if missing)
+xenv validate @production --require DATABASE_URL,STRIPE_KEY
+
+# machine-readable
+xenv validate @production --json
+```
+
+checks for:
+- missing required keys (from `--require` flag or `.xenv.required` manifest file)
+- empty values on keys that look like secrets (`*_KEY`, `*_SECRET`, `*_TOKEN`, etc.)
+- vault files with no decryption key configured
+- plaintext and vault out of sync
+
+exits 0 if ok, 1 if any errors. put it in CI before deploy.
+
+### `xenv audit` — security scanner
+
+```bash
+xenv audit
+xenv audit --json
+```
+
+scans the project for:
+- `.xenv.keys` not in `.gitignore`
+- plaintext secret files not gitignored
+- `.enc` vaults with no key configured (orphan vaults)
+- keys in `.xenv.keys` with no corresponding vault (orphan keys)
+- sensitive-looking values in unencrypted files (detects `sk_live_*`, `ghp_*`, long hex strings, etc.)
+
+run it in CI. run it before commits. let your AI agent run it after every secret change.
 
 ---
 
