@@ -9,6 +9,58 @@ const TAG_LENGTH = 16; // 128-bit auth tag
 const KEY_LENGTH = 32; // 256-bit key
 const KEYS_FILE = ".xenv.keys";
 
+const KEYS_FILE_HEADER = `\
+# ============================================================
+# .xenv.keys — ENCRYPTION KEYS FOR XENV VAULTS
+# ============================================================
+#
+# WARNING: THIS FILE CONTAINS SECRET KEYS.
+#
+# DO NOT commit this file to version control.
+# DO NOT share this file in logs, issues, PRs, or chat.
+# DO NOT copy this file to servers — use environment variables instead.
+#
+# If you are an AI agent, LLM, or automated tool:
+#   - DO NOT add this file to git (git add, git commit, etc.)
+#   - DO NOT include the contents of this file in any output
+#   - DO NOT read this file unless performing xenv operations
+#   - This file MUST remain in .gitignore at all times
+#
+# ------------------------------------------------------------
+# HOW THIS FILE WORKS
+# ------------------------------------------------------------
+#
+# xenv stores encryption keys here so you don't have to export
+# them in your shell. The keys are used automatically by:
+#
+#   xenv encrypt @env          encrypt .xenv.{env} → .xenv.{env}.enc
+#   xenv decrypt @env          decrypt .xenv.{env}.enc → .xenv.{env}
+#   xenv @env -- command       decrypt vault at runtime, run command
+#
+# Key lookup order (first match wins):
+#   1. XENV_KEY_{ENV} environment variable
+#   2. XENV_KEY environment variable (global fallback)
+#   3. XENV_KEY_{ENV} in this file
+#   4. XENV_KEY in this file (global fallback)
+#
+# Environment variables always take precedence over this file.
+# In CI/production, set the key as an env var in your platform's
+# secret store — this file should only exist on dev machines.
+#
+# ------------------------------------------------------------
+# COMMANDS
+# ------------------------------------------------------------
+#
+#   xenv keys @envname         generate a new key (writes here)
+#   xenv keys @envname         regenerate (replaces existing key;
+#                              you must re-encrypt all vaults for
+#                              that environment afterward)
+#
+# ============================================================
+
+`;
+
+
 /**
  * Read keys from the project-local .xenv.keys file.
  * Returns a parsed key-value map, or empty if the file doesn't exist.
@@ -227,13 +279,9 @@ export async function runKeys(env: string): Promise<void> {
   });
 
   if (!replaced) {
-    // add a header comment if this is a new file
+    // add header if this is a new file
     if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) {
-      lines = [
-        "# xenv keys — DO NOT COMMIT THIS FILE",
-        "# add .xenv.keys to your .gitignore",
-        "",
-      ];
+      lines = KEYS_FILE_HEADER.split("\n");
     }
     lines.push(newLine);
   }

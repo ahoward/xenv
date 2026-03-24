@@ -188,7 +188,9 @@ describe("vault", () => {
 
     const content = readFileSync(keysPath, "utf-8");
     expect(content).toContain("XENV_KEY_PRODUCTION=");
-    expect(content).toContain("DO NOT COMMIT");
+    expect(content).toContain("DO NOT commit this file");
+    expect(content).toContain("AI agent");
+    expect(content).toContain(".gitignore");
 
     // key should be 64 hex chars in the file
     const match = content.match(/XENV_KEY_PRODUCTION="([a-f0-9]{64})"/);
