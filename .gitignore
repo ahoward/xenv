@@ -1,0 +1,16 @@
+# bny:start
+bny/bny.pid
+bny/children/
+# bny:end
+
+# secrets
+.envrc
+.env*.local
+.xenv*.local
+.xenv.production
+.xenv.staging
+
+# build artifacts
+xenv
+xenv-*
+node_modules/

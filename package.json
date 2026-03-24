@@ -1,0 +1,15 @@
+{
+  "name": "xenv",
+  "version": "1.0.0",
+  "description": "blazing-fast, zero-dependency environment runner and secrets manager",
+  "type": "module",
+  "main": "src/cli.ts",
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun build ./src/cli.ts --compile --minify --target=bun-linux-x64 --outfile=xenv",
+    "build:all": "bun run scripts/build-all.ts",
+    "test": "bun test"
+  },
+  "license": "MIT",
+  "author": "mountainhigh.codes"
+}
