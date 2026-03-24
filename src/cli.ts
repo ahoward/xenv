@@ -8,6 +8,7 @@ import { edit_set, edit_delete, edit_list } from "./edit";
 import { diff_env, format_diff } from "./diff";
 import { validate_env, format_validation } from "./validate";
 import { audit_project, format_audit } from "./audit";
+import { run_mcp_server } from "./mcp";
 import { print_output } from "./output";
 
 const VERSION = "1.0.0";
@@ -52,6 +53,12 @@ async function main(): Promise<void> {
     const keys_only = !!args.flags["keys-only"];
     const result = await diff_env(args.env, keys_only);
     print_output(result, args.json, format_diff);
+    process.exit(0);
+  }
+
+  // mcp server
+  if (args.command === "mcp") {
+    await run_mcp_server();
     process.exit(0);
   }
 

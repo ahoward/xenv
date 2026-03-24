@@ -295,3 +295,66 @@ export async function runKeys(env: string): Promise<void> {
   console.log(`\nfor CI, set this secret:`);
   console.log(`  ${keyName}="${key}"`);
 }
+
+/**
+ * Rotate the encryption key for a vault.
+ * Generates a new key, decrypts vault with old key, re-encrypts with new key,
+ * updates .xenv.keys.
+ */
+export async function rotate_vault_key(env: string, cwd: string = process.cwd()): Promise<{ env: string; new_key: string }> {
+  const enc_path = join(cwd, `.xenv.${env}.enc`);
+
+  if (!existsSync(enc_path)) {
+    throw new Error(`vault not found: .xenv.${env}.enc`);
+  }
+
+  const old_key = resolveKey(env, cwd);
+  if (!old_key) {
+    throw new Error(`decryption key not found: ${keyEnvNames(env)}`);
+  }
+
+  // decrypt with old key
+  const plaintext = await decryptVault(enc_path, old_key);
+
+  // generate new key
+  const new_key = generateKey();
+
+  // re-encrypt with new key
+  const encrypted = await encrypt_content(plaintext, new_key);
+  await Bun.write(enc_path, encrypted + "\n");
+
+  // update .xenv.keys with the new key
+  const keys_path = join(cwd, KEYS_FILE);
+  const key_name = `XENV_KEY_${env.toUpperCase()}`;
+
+  let lines: string[] = [];
+  if (existsSync(keys_path)) {
+    lines = readFileSync(keys_path, "utf-8").split("\n");
+  }
+
+  const prefix = `${key_name}=`;
+  const new_line = `${key_name}="${new_key}"`;
+  let replaced = false;
+
+  lines = lines.map((line) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith(prefix) || trimmed.startsWith(`export ${prefix}`)) {
+      replaced = true;
+      return new_line;
+    }
+    return line;
+  });
+
+  if (!replaced) {
+    if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) {
+      lines = KEYS_FILE_HEADER.split("\n");
+    }
+    lines.push(new_line);
+  }
+
+  const content = lines.join("\n").trimEnd() + "\n";
+  await Bun.write(keys_path, content);
+  chmodSync(keys_path, 0o600);
+
+  return { env, new_key };
+}
