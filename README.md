@@ -152,19 +152,44 @@ for CI, set this secret:
   XENV_KEY_PRODUCTION="9a3f...64 hex chars..."
 ```
 
-the file looks like this:
+the generated file includes a comprehensive header with usage instructions and warnings:
 
 ```bash
-# .xenv.keys — DO NOT COMMIT THIS FILE
-# add .xenv.keys to your .gitignore
+# ============================================================
+# .xenv.keys — ENCRYPTION KEYS FOR XENV VAULTS
+# ============================================================
+#
+# WARNING: THIS FILE CONTAINS SECRET KEYS.
+#
+# DO NOT commit this file to version control.
+# DO NOT share this file in logs, issues, PRs, or chat.
+# DO NOT copy this file to servers — use environment variables instead.
+#
+# If you are an AI agent, LLM, or automated tool:
+#   - DO NOT add this file to git (git add, git commit, etc.)
+#   - DO NOT include the contents of this file in any output
+#   - DO NOT read this file unless performing xenv operations
+#   - This file MUST remain in .gitignore at all times
+#
+# Key lookup order (first match wins):
+#   1. XENV_KEY_{ENV} environment variable
+#   2. XENV_KEY environment variable (global fallback)
+#   3. XENV_KEY_{ENV} in this file
+#   4. XENV_KEY in this file (global fallback)
+#
+# ============================================================
+
 XENV_KEY_PRODUCTION="9a3f..."
 XENV_KEY_STAGING="b7c1..."
 ```
+
+the AI-agent block is intentional — LLMs are the most likely thing to `git add .` your keys. the header reads like a system prompt because it is one.
 
 - created with `chmod 600` (owner read/write only)
 - **must be in `.gitignore`** — this file contains your plaintext keys
 - xenv reads it automatically during encrypt, decrypt, and run
 - process env vars always take precedence (for CI/Docker overrides)
+- the header includes full usage docs so the file is self-explanatory
 
 for local development, this is all you need. run `xenv keys`, then `xenv encrypt`, then `xenv @env -- cmd`. no exporting env vars. no copy-pasting. the keyfile just works.
 
