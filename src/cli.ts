@@ -6,6 +6,7 @@ import { runEncrypt, runDecrypt, runKeys } from "./vault";
 import { run } from "./run";
 import { edit_set, edit_delete, edit_list } from "./edit";
 import { diff_env, format_diff } from "./diff";
+import { validate_env, format_validation } from "./validate";
 import { print_output } from "./output";
 
 const VERSION = "1.0.0";
@@ -51,6 +52,17 @@ async function main(): Promise<void> {
     const result = await diff_env(args.env, keys_only);
     print_output(result, args.json, format_diff);
     process.exit(0);
+  }
+
+  // validate command
+  if (args.command === "validate") {
+    const require_flag = args.flags["require"];
+    const required_keys = typeof require_flag === "string"
+      ? require_flag.split(",").map(k => k.trim()).filter(Boolean)
+      : [];
+    const result = await validate_env(args.env, required_keys);
+    print_output(result, args.json, format_validation);
+    process.exit(result.ok ? 0 : 1);
   }
 
   // resolve command
