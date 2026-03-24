@@ -4,11 +4,38 @@
   "description": "blazing-fast, zero-dependency environment runner and secrets manager",
   "type": "module",
   "main": "src/cli.ts",
+  "bin": {
+    "xenv": "src/cli.ts"
+  },
   "scripts": {
     "dev": "bun run src/cli.ts",
     "build": "bun build ./src/cli.ts --compile --minify --target=bun-linux-x64 --outfile=xenv",
     "build:all": "bun run scripts/build-all.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "site:build": "bun run site/build.ts",
+    "site:preview": "bun run site/build.ts && cd site/dist && python3 -m http.server 8080"
+  },
+  "keywords": [
+    "env",
+    "secrets",
+    "encryption",
+    "dotenv",
+    "environment",
+    "vault",
+    "mcp",
+    "ai-agent",
+    "secrets-management",
+    "environment-variables",
+    "aes-256-gcm",
+    "zero-dependency"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ahoward/xenv.git"
+  },
+  "homepage": "https://github.com/ahoward/xenv",
+  "bugs": {
+    "url": "https://github.com/ahoward/xenv/issues"
   },
   "license": "MIT",
   "author": "mountainhigh.codes"

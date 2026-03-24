@@ -9,6 +9,7 @@ import { diff_env, format_diff } from "./diff";
 import { validate_env, format_validation } from "./validate";
 import { audit_project, format_audit } from "./audit";
 import { run_mcp_server } from "./mcp";
+import { run_init } from "./init";
 import { print_output } from "./output";
 
 const VERSION = "1.0.0";
@@ -23,6 +24,12 @@ async function main(): Promise<void> {
 
   if (args.help) {
     printUsage();
+    process.exit(0);
+  }
+
+  // init command
+  if (args.command === "init") {
+    await run_init(args.env);
     process.exit(0);
   }
 
@@ -113,7 +120,7 @@ async function handleEdit(args: ReturnType<typeof parseArgs>): Promise<void> {
     const pair = positional[0];
     const eq = pair.indexOf("=");
     if (eq === -1) {
-      throw new Error(`invalid format: expected KEY=VALUE, got "${pair}"`);
+      throw new Error(`invalid format: expected KEY=VALUE, got "${pair}" — use KEY=VALUE format`);
     }
     const key = pair.slice(0, eq);
     const value = pair.slice(eq + 1);
@@ -145,33 +152,29 @@ function printUsage(): void {
   const usage = `
 xenv — environment runner & secrets manager
 
-usage:
-  xenv [@env] -- <command> [args...]
-  xenv encrypt  @env
-  xenv decrypt  @env
-  xenv keys     @env
-  xenv edit     @env <set KEY=VALUE | delete KEY | list>
-  xenv resolve  @env [--json]
-  xenv diff     @env [--keys-only] [--json]
-  xenv validate @env [--require KEY,...] [--json]
-  xenv audit    [--json]
-  xenv mcp
+commands:
+  xenv [@env] -- <command>              run a command with the resolved environment
+  xenv init     [@env]                  bootstrap xenv in a project
+  xenv encrypt  @env                    encrypt .xenv.{env} to .xenv.{env}.enc
+  xenv decrypt  @env                    decrypt .xenv.{env}.enc to .xenv.{env}
+  xenv keys     @env                    generate a 256-bit encryption key
+  xenv edit     @env <set|delete|list>  edit secrets without decrypting to disk
+  xenv resolve  @env [--json]           dump the merged 7-layer cascade
+  xenv diff     @env [--keys-only]      compare plaintext vs encrypted vault
+  xenv validate @env [--require K,...]  pre-flight check for missing/empty keys
+  xenv audit    [--json]                scan project for security mistakes
+  xenv mcp                              start MCP server (JSON-RPC 2.0 stdio)
 
 options:
   --help, -h       show this help
   --version, -v    show version
   --json           machine-readable JSON output
 
-examples:
-  xenv @production -- ./server
-  xenv -- bun run dev
-  xenv encrypt @production
-  xenv decrypt @production
-  xenv keys @production
-  xenv edit @production set API_KEY=secret
-  xenv edit @production delete OLD_KEY
-  xenv edit @production list --json
-  xenv resolve @production --json
+getting started:
+  xenv init                             set up xenv in your project
+  xenv @production -- ./server          run with production environment
+
+docs: https://github.com/ahoward/xenv
 `.trim();
   console.log(usage);
 }

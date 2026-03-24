@@ -11,7 +11,7 @@ export interface ParsedArgs {
 }
 
 const COMMANDS = new Set([
-  "encrypt", "decrypt", "keys",
+  "encrypt", "decrypt", "keys", "init",
   "edit", "diff", "validate", "audit", "resolve", "mcp",
 ]);
 
