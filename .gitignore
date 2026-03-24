@@ -14,4 +14,6 @@ bny/children/
 # build artifacts
 xenv
 xenv-*
+dist/
+site/dist/
 node_modules/

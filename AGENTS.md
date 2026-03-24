@@ -1,36 +1,8 @@
-<!-- bny:start -->
-## bny
-
-you have `bny` available — a persistent knowledge graph and build factory.
-
-commands:
-- `bny digest <source>` — ingest file, URL, or directory into the knowledge graph
-- `bny brane ask "question"` — query accumulated knowledge
-- `bny brane tldr` — instant outline of what the graph knows
-- `bny build "description"` — full pipeline: specify → plan → tasks → review → implement → ruminate
-- `bny spike "description"` — exploratory build (no review)
-- `bny proposal "topic"` — generate proposals from the graph
-
-workflow:
-- read `bny/state.md` if it exists — shows current build pipeline state
-- tests are written by the antagonist agent — do NOT modify test files during implementation
-- run `./dev/test` after code changes — all tests must pass
-- run `./dev/post_flight` before commits
-- read `bny/guardrails.json` for project constraints
-- append to `bny/decisions.md` after completing work
-
-knowledge graph:
-- read `bny/brane/worldview/README.md` for accumulated project knowledge
-- the worldview README is auto-regenerated after every brane operation
-
-state lives in `bny/`. do not modify state files directly.
-<!-- bny:end -->
-
----
-
 # xenv — agent guide
 
-environment runner and secrets manager. single binary. zero dependencies. AES-256-GCM encrypted vaults. 7-layer cascade. MCP server for AI tool integration.
+> Compatible with: Claude Code, Cursor, Windsurf, GitHub Copilot, Cline, Aider, Zed AI, Continue, RooCode, and any MCP-compatible tool.
+
+AI-native environment runner and secrets manager. single binary. zero dependencies. AES-256-GCM encrypted vaults. 7-layer cascade. MCP server for AI tool integration.
 
 ## quick start
 
@@ -61,7 +33,39 @@ claude mcp add xenv -- xenv mcp
 }
 ```
 
-MCP tools available: `resolve_env`, `set_secret`, `delete_secret`, `list_secrets`, `rotate_key`, `audit`, `validate`.
+MCP tools available: `init`, `resolve_env`, `set_secret`, `delete_secret`, `list_secrets`, `encrypt`, `diff`, `rotate_key`, `audit`, `validate`.
+
+---
+
+<!-- bny:start -->
+## bny
+
+you have `bny` available — a persistent knowledge graph and build factory.
+
+commands:
+- `bny digest <source>` — ingest file, URL, or directory into the knowledge graph
+- `bny brane ask "question"` — query accumulated knowledge
+- `bny brane tldr` — instant outline of what the graph knows
+- `bny build "description"` — full pipeline: specify → plan → tasks → review → implement → ruminate
+- `bny spike "description"` — exploratory build (no review)
+- `bny proposal "topic"` — generate proposals from the graph
+
+workflow:
+- read `bny/state.md` if it exists — shows current build pipeline state
+- tests are written by the antagonist agent — do NOT modify test files during implementation
+- run `./dev/test` after code changes — all tests must pass
+- run `./dev/post_flight` before commits
+- read `bny/guardrails.json` for project constraints
+- append to `bny/decisions.md` after completing work
+
+knowledge graph:
+- read `bny/brane/worldview/README.md` for accumulated project knowledge
+- the worldview README is auto-regenerated after every brane operation
+
+state lives in `bny/`. do not modify state files directly.
+<!-- bny:end -->
+
+---
 
 ## all commands
 
@@ -82,6 +86,18 @@ MCP tools available: `resolve_env`, `set_secret`, `delete_secret`, `list_secrets
 | `xenv mcp` | start MCP server (stdio) | `xenv mcp` |
 
 all commands support `--json` for machine-readable output.
+
+## --json output schemas
+
+| command | shape |
+|---------|-------|
+| `resolve --json` | `Record<string, string>` — flat key-value object |
+| `edit set --json` | `{ env, action: "set", key }` |
+| `edit delete --json` | `{ env, action: "deleted", key }` |
+| `edit list --json` | `string[]` — sorted key names |
+| `diff --json` | `{ env, added: [{key, ...}], removed: [...], changed: [...], unchanged: number }` |
+| `validate --json` | `{ env, ok: boolean, checks: [{ severity, code, key?, message }] }` |
+| `audit --json` | `{ ok: boolean, findings: [{ severity, code, file?, message }] }` |
 
 ## code style
 
@@ -104,9 +120,10 @@ src/edit.ts         atomic vault editing (edit_set, edit_delete, edit_list)
 src/diff.ts         plaintext vs vault comparison
 src/validate.ts     pre-flight environment checks
 src/audit.ts        project security scanner
-src/mcp.ts          MCP server (JSON-RPC 2.0 over stdio)
+src/mcp.ts          MCP server (JSON-RPC 2.0 over stdio, 10 tools)
 src/run.ts          child process execution with signal forwarding
 src/output.ts       consistent human/JSON output formatting
+src/init.ts         project bootstrapping (xenv init)
 ```
 
 data flow: `cli.ts → args.ts (parse) → command module → output.ts (format)`
@@ -122,7 +139,6 @@ bun test              # run all tests
 - tests are written by the antagonist agent — **do NOT modify test files**
 - tests call exported functions directly, not the CLI binary
 - temp directories via `mkdtempSync` for file system isolation
-- 89 tests, 124 assertions across 5 test files
 
 ## security rules
 

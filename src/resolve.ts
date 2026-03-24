@@ -20,7 +20,7 @@ export async function resolveEnv(
 ): Promise<Record<string, string>> {
   // reject env names with path traversal or slashes
   if (env.includes("/") || env.includes("\\") || env.includes("..")) {
-    throw new Error(`invalid environment name: ${env}`);
+    throw new Error(`invalid environment name: ${env} — use alphanumeric names like 'production', 'staging', 'test'`);
   }
   const merged: Record<string, string> = Object.create(null);
 
@@ -53,13 +53,13 @@ export async function resolveEnv(
   // 5. encrypted vault
   const encPath = join(cwd, `.xenv.${env}.enc`);
   if (existsSync(encPath)) {
-    const key = resolveKey(env);
+    const key = resolveKey(env, cwd);
     if (key) {
       const decrypted = await decryptVault(encPath, key);
       const parsed = parseEnvContent(decrypted);
       Object.assign(merged, parsed);
     } else {
-      console.error(`xenv: warning: vault .xenv.${env}.enc exists but ${keyEnvNames(env)} is not set — skipping`);
+      console.error(`xenv: warning: vault .xenv.${env}.enc exists but ${keyEnvNames(env)} is not set — run 'xenv keys @${env}' to generate a key, or set the env var in your shell`);
     }
   }
 

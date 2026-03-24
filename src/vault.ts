@@ -176,11 +176,16 @@ async function decrypt(raw: string, keyHex: string): Promise<string> {
     ["decrypt"]
   );
 
-  const decrypted = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv, tagLength: TAG_LENGTH * 8 },
-    cryptoKey,
-    ciphertext
-  );
+  let decrypted: ArrayBuffer;
+  try {
+    decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv, tagLength: TAG_LENGTH * 8 },
+      cryptoKey,
+      ciphertext
+    );
+  } catch {
+    throw new Error("decryption failed — the key may be incorrect, or the vault file may be corrupted");
+  }
 
   return new TextDecoder().decode(decrypted);
 }
@@ -201,7 +206,7 @@ export async function runEncrypt(env: string): Promise<void> {
   const sourcePath = join(cwd, `.xenv.${env}`);
 
   if (!existsSync(sourcePath)) {
-    throw new Error(`source file not found: .xenv.${env}`);
+    throw new Error(`source file not found: .xenv.${env} — create it first, or run 'xenv init @${env}'`);
   }
 
   const key = resolveKey(env);
@@ -228,13 +233,13 @@ export async function runDecrypt(env: string): Promise<void> {
   const encPath = join(cwd, `.xenv.${env}.enc`);
 
   if (!existsSync(encPath)) {
-    throw new Error(`vault not found: .xenv.${env}.enc`);
+    throw new Error(`vault not found: .xenv.${env}.enc — run 'xenv encrypt @${env}' to create it`);
   }
 
   const key = resolveKey(env);
   if (!key) {
     throw new Error(
-      `decryption key not found in environment: ${keyEnvNames(env)}`
+      `decryption key not found: ${keyEnvNames(env)} — run 'xenv keys @${env}' to generate one`
     );
   }
 
@@ -305,12 +310,12 @@ export async function rotate_vault_key(env: string, cwd: string = process.cwd())
   const enc_path = join(cwd, `.xenv.${env}.enc`);
 
   if (!existsSync(enc_path)) {
-    throw new Error(`vault not found: .xenv.${env}.enc`);
+    throw new Error(`vault not found: .xenv.${env}.enc — run 'xenv encrypt @${env}' to create it`);
   }
 
   const old_key = resolveKey(env, cwd);
   if (!old_key) {
-    throw new Error(`decryption key not found: ${keyEnvNames(env)}`);
+    throw new Error(`decryption key not found: ${keyEnvNames(env)} — run 'xenv keys @${env}' to generate one`);
   }
 
   // decrypt with old key
@@ -319,11 +324,7 @@ export async function rotate_vault_key(env: string, cwd: string = process.cwd())
   // generate new key
   const new_key = generateKey();
 
-  // re-encrypt with new key
-  const encrypted = await encrypt_content(plaintext, new_key);
-  await Bun.write(enc_path, encrypted + "\n");
-
-  // update .xenv.keys with the new key
+  // update .xenv.keys with the new key FIRST (crash-safe: old vault is still readable with old key)
   const keys_path = join(cwd, KEYS_FILE);
   const key_name = `XENV_KEY_${env.toUpperCase()}`;
 
@@ -355,6 +356,10 @@ export async function rotate_vault_key(env: string, cwd: string = process.cwd())
   const content = lines.join("\n").trimEnd() + "\n";
   await Bun.write(keys_path, content);
   chmodSync(keys_path, 0o600);
+
+  // NOW re-encrypt with new key (if this fails, .xenv.keys has the new key but vault still has old — recoverable)
+  const encrypted = await encrypt_content(plaintext, new_key);
+  await Bun.write(enc_path, encrypted + "\n");
 
   return { env, new_key };
 }

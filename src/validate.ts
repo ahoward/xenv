@@ -66,12 +66,13 @@ export async function validate_env(
       const vault_content = await decryptVault(enc_path, key);
       const vault_data = parseEnvContent(vault_content);
 
-      const pt_keys = Object.keys(plaintext_data).sort().join(",");
-      const vt_keys = Object.keys(vault_data).sort().join(",");
-      const pt_vals = Object.keys(plaintext_data).sort().map(k => plaintext_data[k]).join(",");
-      const vt_vals = Object.keys(vault_data).sort().map(k => vault_data[k]).join(",");
+      const all_keys = new Set([...Object.keys(plaintext_data), ...Object.keys(vault_data)]);
+      let differs = false;
+      for (const k of all_keys) {
+        if (plaintext_data[k] !== vault_data[k]) { differs = true; break; }
+      }
 
-      if (pt_keys !== vt_keys || pt_vals !== vt_vals) {
+      if (differs) {
         checks.push({
           severity: "warning",
           code: "out_of_sync",

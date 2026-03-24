@@ -33,7 +33,7 @@ export async function diff_env(
   const has_vault = existsSync(enc_path);
 
   if (!has_plaintext && !has_vault) {
-    throw new Error(`neither .xenv.${env} nor .xenv.${env}.enc found`);
+    throw new Error(`neither .xenv.${env} nor .xenv.${env}.enc found — run 'xenv init @${env}' to get started`);
   }
 
   // parse plaintext if it exists
@@ -49,7 +49,7 @@ export async function diff_env(
     const key = resolveKey(env, cwd);
     if (!key) {
       throw new Error(
-        `vault exists but decryption key not found: ${keyEnvNames(env)}`
+        `vault exists but decryption key not found: ${keyEnvNames(env)} — run 'xenv keys @${env}' to generate one`
       );
     }
     const decrypted = await decryptVault(enc_path, key);

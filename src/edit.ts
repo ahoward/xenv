@@ -56,7 +56,7 @@ async function load_vault(env: string, cwd: string): Promise<{ data: Record<stri
   const enc_path = join(cwd, `.xenv.${env}.enc`);
 
   if (!existsSync(enc_path)) {
-    throw new Error(`vault not found: .xenv.${env}.enc`);
+    throw new Error(`vault not found: .xenv.${env}.enc — run 'xenv encrypt @${env}' to create it, or 'xenv init @${env}' to start fresh`);
   }
 
   const key = resolveKey(env, cwd);
@@ -100,7 +100,7 @@ export async function edit_delete(env: string, key: string, cwd: string = proces
   const { data, key: enc_key } = await load_vault(env, cwd);
 
   if (!(key in data)) {
-    throw new Error(`key not found in vault: ${key}`);
+    throw new Error(`key not found in vault: ${key} — run 'xenv edit @${env} list' to see available keys`);
   }
 
   delete data[key];

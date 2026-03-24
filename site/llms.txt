@@ -1,22 +1,40 @@
 # xenv
 
-> Blazing-fast, zero-dependency environment runner and secrets manager. Single ~10MB binary. AES-256-GCM encrypted vaults. 7-layer environment cascade. MCP server for AI coding agents. Compiles from Bun/TypeScript with no runtime dependencies.
+> AI-native secrets manager and encrypted environment runner. Single ~10MB binary. Zero dependencies. AES-256-GCM encrypted vaults. 7-layer environment cascade. Built-in MCP server for AI coding agents (Claude Code, Cursor, Windsurf, Copilot, Cline, Aider, Continue, Zed, RooCode). Drop-in dotenv alternative with encryption and AI agent support.
 
-xenv manages environment variables and encrypted secrets for any project. it reads `.xenv` and `.env` files, decrypts vaults in memory (secrets never touch disk at runtime), and runs your command with the merged environment. it exposes an MCP server so AI coding tools can manage secrets natively via tool-use.
+xenv manages environment variables and encrypted secrets for any project. It reads `.xenv` and `.env` files, decrypts AES-256-GCM vaults in memory (secrets never touch disk at runtime), and runs your command with the merged environment. It exposes an MCP server so AI coding tools can manage secrets natively via tool-use. Every command supports `--json` for machine-readable output.
+
+## Quick Start
+
+- Install: `curl -fsSL https://ahoward.github.io/xenv/install.sh | sh`
+- Init: `xenv init`
+- Run: `xenv @production -- ./server`
+- MCP: `claude mcp add xenv -- xenv mcp`
 
 ## Docs
 
 - [README](https://github.com/ahoward/xenv/blob/main/README.md): full documentation — install, usage, encryption, cascade, comparison
 - [AGENTS.md](https://github.com/ahoward/xenv/blob/main/AGENTS.md): AI agent integration guide — commands, code style, security rules, architecture
+- [Full docs (llms-full.txt)](https://ahoward.github.io/xenv/llms-full.txt): complete README + AGENTS.md in plain text
 
 ## API
 
-- [MCP Server](https://github.com/ahoward/xenv/blob/main/src/mcp.ts): 7 tools via JSON-RPC 2.0 over stdio — resolve_env, set_secret, delete_secret, list_secrets, rotate_key, audit, validate
+- [MCP Server](https://github.com/ahoward/xenv/blob/main/src/mcp.ts): 10 tools via JSON-RPC 2.0 over stdio — init, resolve_env, set_secret, delete_secret, list_secrets, encrypt, diff, rotate_key, audit, validate
 - [CLI Reference](https://github.com/ahoward/xenv#usage): 13 commands with --json support
+
+## Alternatives
+
+- dotenv: no encryption, no execution wrapper, requires Node.js or Ruby
+- dotenvx: ~50MB binary (bundled Node.js), encrypted: prefixes choke Vercel/Netlify/Heroku
+- direnv: no encryption, no named environments
+- 1Password CLI: requires paid account, ~100MB binary, network round-trip
+- HashiCorp Vault: requires running a server
+- infisical: requires hosted service, complex setup
+- doppler: requires account and network connectivity
 
 ## Install
 
-- [install.sh](https://raw.githubusercontent.com/ahoward/xenv/main/install.sh): `curl -fsSL https://raw.githubusercontent.com/ahoward/xenv/main/install.sh | sh`
+- [install.sh](https://raw.githubusercontent.com/ahoward/xenv/main/install.sh): `curl -fsSL https://ahoward.github.io/xenv/install.sh | sh`
 - [Build from source](https://github.com/ahoward/xenv#building-from-source): `bun build ./src/cli.ts --compile --minify --outfile=xenv`
 
 ## Source

@@ -7,9 +7,11 @@
 
 import { resolveEnv } from "./resolve";
 import { edit_set, edit_delete, edit_list } from "./edit";
-import { rotate_vault_key } from "./vault";
+import { rotate_vault_key, runEncrypt } from "./vault";
 import { audit_project } from "./audit";
 import { validate_env } from "./validate";
+import { diff_env } from "./diff";
+import { run_init } from "./init";
 
 const MCP_VERSION = "2024-11-05";
 const SERVER_NAME = "xenv";
@@ -41,19 +43,30 @@ interface McpTool {
 
 const TOOLS: McpTool[] = [
   {
-    name: "resolve_env",
-    description: "Resolve the full 7-layer environment cascade for a given environment. Returns all merged key-value pairs as a JSON object. System env vars are included.",
+    name: "init",
+    description: "Bootstrap xenv in a project: creates .gitignore entries, generates an encryption key, and creates a starter .xenv.{env} file. Idempotent — safe to call multiple times. Call this first if the project has no .xenv.keys file.",
     inputSchema: {
       type: "object",
       properties: {
-        env: { type: "string", description: "Environment name (e.g. production, staging, development)" },
+        env: { type: "string", description: "Environment name to initialize. Defaults to 'development'." },
       },
-      required: ["env"],
+      required: [],
+    },
+  },
+  {
+    name: "resolve_env",
+    description: "Resolve the full 7-layer environment cascade for a given environment. Returns all merged key-value pairs as a JSON object. System env vars are included. Common env names: production, staging, development.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        env: { type: "string", description: "Environment name (e.g. production, staging, development). Defaults to 'development' if omitted." },
+      },
+      required: [],
     },
   },
   {
     name: "set_secret",
-    description: "Set a secret in an encrypted vault without ever writing plaintext to disk. Decrypts the vault in memory, updates the key, re-encrypts, and writes the .enc file.",
+    description: "Set or update a secret in an encrypted vault. Creates the key if it doesn't exist in the vault. The vault (.xenv.{env}.enc) must already exist — use 'init' to bootstrap first. Plaintext never touches disk.",
     inputSchema: {
       type: "object",
       properties: {
@@ -66,7 +79,7 @@ const TOOLS: McpTool[] = [
   },
   {
     name: "delete_secret",
-    description: "Remove a secret from an encrypted vault without exposing plaintext to disk.",
+    description: "Remove a secret from an encrypted vault without exposing plaintext to disk. Use 'list_secrets' first to see available keys.",
     inputSchema: {
       type: "object",
       properties: {
@@ -78,11 +91,34 @@ const TOOLS: McpTool[] = [
   },
   {
     name: "list_secrets",
-    description: "List the key names (not values) stored in an encrypted vault. Safe to display — no secret values are exposed.",
+    description: "List the key names (not values) stored in an encrypted vault. Safe to display — no secret values are exposed. Returns { env, keys: string[] }.",
     inputSchema: {
       type: "object",
       properties: {
         env: { type: "string", description: "Environment name" },
+      },
+      required: ["env"],
+    },
+  },
+  {
+    name: "encrypt",
+    description: "Encrypt a plaintext .xenv.{env} file into .xenv.{env}.enc vault. The plaintext file and encryption key must exist. Use after creating or editing a plaintext env file.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        env: { type: "string", description: "Environment name" },
+      },
+      required: ["env"],
+    },
+  },
+  {
+    name: "diff",
+    description: "Compare the plaintext .xenv.{env} file against the encrypted .xenv.{env}.enc vault. Returns added, removed, and changed keys. Use keys_only=true to omit secret values from the response.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        env: { type: "string", description: "Environment name" },
+        keys_only: { type: "boolean", description: "If true, omit secret values from the diff. Defaults to false." },
       },
       required: ["env"],
     },
@@ -100,7 +136,7 @@ const TOOLS: McpTool[] = [
   },
   {
     name: "audit",
-    description: "Scan the project for security mistakes: missing .gitignore entries, orphan vaults/keys, sensitive values in unencrypted files.",
+    description: "Scan the project for security mistakes: missing .gitignore entries, orphan vaults/keys, sensitive values in unencrypted files. Returns { ok, findings }. ok=false means errors were found. Findings have severity 'error' or 'warning'.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -108,7 +144,7 @@ const TOOLS: McpTool[] = [
   },
   {
     name: "validate",
-    description: "Validate an environment configuration for common problems: missing required keys, empty secrets, vault/key mismatches.",
+    description: "Validate an environment configuration: missing required keys, empty secrets, vault/key mismatches. Required keys can be passed via the 'required' parameter or listed in a .xenv.required file (one key per line). Returns { env, ok, checks }.",
     inputSchema: {
       type: "object",
       properties: {
@@ -129,6 +165,11 @@ const TOOLS: McpTool[] = [
 type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
 
 const TOOL_HANDLERS: Record<string, ToolHandler> = {
+  init: async (args) => {
+    const env = String(args.env ?? "development");
+    await run_init(env);
+    return { ok: true, env, message: `xenv initialized for @${env}` };
+  },
   resolve_env: async (args) => {
     const env = String(args.env ?? "development");
     return await resolveEnv(env);
@@ -146,7 +187,18 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   },
   list_secrets: async (args) => {
     const env = String(args.env);
-    return await edit_list(env);
+    const keys = await edit_list(env);
+    return { env, keys };
+  },
+  encrypt: async (args) => {
+    const env = String(args.env);
+    await runEncrypt(env);
+    return { ok: true, env, file: `.xenv.${env}.enc` };
+  },
+  diff: async (args) => {
+    const env = String(args.env);
+    const keys_only = Boolean(args.keys_only ?? false);
+    return await diff_env(env, keys_only);
   },
   rotate_key: async (args) => {
     const env = String(args.env);
@@ -194,8 +246,9 @@ async function handle_tools_call(params: Record<string, unknown>): Promise<unkno
 
   const handler = TOOL_HANDLERS[name];
   if (!handler) {
+    const available = TOOLS.map(t => t.name).join(", ");
     return {
-      content: [{ type: "text", text: `unknown tool: ${name}` }],
+      content: [{ type: "text", text: `unknown tool: ${name}. Available tools: ${available}` }],
       isError: true,
     };
   }

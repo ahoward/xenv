@@ -120,7 +120,7 @@ async function handleEdit(args: ReturnType<typeof parseArgs>): Promise<void> {
     const pair = positional[0];
     const eq = pair.indexOf("=");
     if (eq === -1) {
-      throw new Error(`invalid format: expected KEY=VALUE, got "${pair}" — use KEY=VALUE format`);
+      throw new Error(`invalid format: expected KEY=VALUE, got "${pair}" — example: xenv edit @${args.env} set MY_KEY=my_value`);
     }
     const key = pair.slice(0, eq);
     const value = pair.slice(eq + 1);

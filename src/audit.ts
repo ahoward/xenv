@@ -33,7 +33,7 @@ export async function audit_project(cwd: string = process.cwd()): Promise<AuditR
         severity: "error",
         code: "keys_not_gitignored",
         file: ".xenv.keys",
-        message: ".xenv.keys contains encryption keys but is not in .gitignore",
+        message: ".xenv.keys contains encryption keys but is not in .gitignore — add '.xenv.keys' to .gitignore, or run 'xenv init' to fix automatically",
       });
     }
   }
@@ -61,7 +61,7 @@ export async function audit_project(cwd: string = process.cwd()): Promise<AuditR
         severity: "error",
         code: "plaintext_not_gitignored",
         file,
-        message: `${file} contains secrets (has matching vault) but is not in .gitignore`,
+        message: `${file} contains secrets (has matching vault) but is not in .gitignore — add '${file}' to .gitignore or delete the plaintext file`,
       });
     }
   }
@@ -77,7 +77,7 @@ export async function audit_project(cwd: string = process.cwd()): Promise<AuditR
         severity: "warning",
         code: "orphan_vault",
         file,
-        message: `${file} has no decryption key configured — cannot be decrypted`,
+        message: `${file} has no decryption key configured — run 'xenv keys @${env_name}' to generate one, or set ${`XENV_KEY_${env_name!.toUpperCase()}`} in your environment`,
       });
     }
   }
@@ -99,7 +99,7 @@ export async function audit_project(cwd: string = process.cwd()): Promise<AuditR
           severity: "warning",
           code: "orphan_key",
           file: ".xenv.keys",
-          message: `${key_name} exists in .xenv.keys but no ${vault_file} vault found`,
+          message: `${key_name} exists in .xenv.keys but no ${vault_file} vault found — run 'xenv encrypt @${env_name}' to create the vault, or remove the unused key`,
         });
       }
     }

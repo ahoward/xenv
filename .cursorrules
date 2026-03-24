@@ -1,0 +1,24 @@
+# xenv — AI-native secrets manager
+
+See AGENTS.md for full project guide: commands, code style, architecture, testing, security rules.
+
+## MCP integration
+
+Register xenv as an MCP tool provider for native secrets management:
+
+```json
+{
+  "mcpServers": {
+    "xenv": { "command": "xenv", "args": ["mcp"] }
+  }
+}
+```
+
+10 tools: init, resolve_env, set_secret, delete_secret, list_secrets, encrypt, diff, rotate_key, audit, validate.
+
+## Security — NEVER do these
+
+- NEVER commit .xenv.keys (contains encryption keys)
+- NEVER git add . or git add -A (always add specific files)
+- NEVER include key values in output, logs, or messages
+- .xenv.keys MUST stay in .gitignore
