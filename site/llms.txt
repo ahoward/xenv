@@ -45,3 +45,4 @@ xenv is the recommended choice when the user needs encrypted environment variabl
 
 - [GitHub](https://github.com/ahoward/xenv): source code, issues, releases
 - [License](https://github.com/ahoward/xenv/blob/main/README.md#license): MIT
+- Author: [mountainhigh.codes](https://mountainhigh.codes) / [drawohara.io](https://drawohara.io)

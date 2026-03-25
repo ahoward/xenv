@@ -657,7 +657,7 @@ xenv takes the runner model from senv, the vault philosophy from sekrets, the am
 
 ## license
 
-MIT
+MIT — [mountainhigh.codes](https://mountainhigh.codes) / [drawohara.io](https://drawohara.io)
 
 ---
 

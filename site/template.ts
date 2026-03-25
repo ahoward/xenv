@@ -55,7 +55,8 @@ export function wrap_html(body: string, css: string): string {
     "author": {
       "@type": "Organization",
       "name": "mountainhigh.codes",
-      "url": "https://github.com/ahoward"
+      "url": "https://mountainhigh.codes",
+      "sameAs": ["https://drawohara.io", "https://github.com/ahoward"]
     },
     "codeRepository": "https://github.com/ahoward/xenv",
     "programmingLanguage": "TypeScript"
@@ -79,7 +80,7 @@ ${body}
   </main>
 
   <footer class="site-footer">
-    xenv — MIT license — <a href="https://github.com/ahoward/xenv">github.com/ahoward/xenv</a>
+    xenv — MIT license — built by <a href="https://mountainhigh.codes">mountainhigh.codes</a> — <a href="https://github.com/ahoward/xenv">github</a>
   </footer>
 </body>
 </html>`;
