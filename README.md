@@ -20,7 +20,7 @@ xenv is the secrets manager built for AI coding agents — with a built-in MCP s
 
 ```bash
 # install
-curl -fsSL https://ahoward.github.io/xenv/install.sh | sh
+curl -fsSL https://xenv.sh/install.sh | sh
 
 # create an environment
 echo 'DATABASE_URL="postgres://localhost/myapp"' > .xenv.development
@@ -94,7 +94,7 @@ no other env tool has any of these.
 ## install
 
 ```bash
-curl -fsSL https://ahoward.github.io/xenv/install.sh | sh
+curl -fsSL https://xenv.sh/install.sh | sh
 ```
 
 or [build from source](#building-from-source) if you prefer.
@@ -636,7 +636,7 @@ MIT
 ## get started
 
 ```bash
-curl -fsSL https://ahoward.github.io/xenv/install.sh | sh
+curl -fsSL https://xenv.sh/install.sh | sh
 xenv keys @production
 xenv encrypt @production
 xenv @production -- ./server

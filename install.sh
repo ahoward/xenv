@@ -2,7 +2,7 @@
 # xenv installer — downloads the latest release binary for your platform.
 #
 # Usage:
-#   curl -fsSL https://ahoward.github.io/xenv/install.sh | sh
+#   curl -fsSL https://xenv.sh/install.sh | sh
 #
 # Environment:
 #   XENV_INSTALL_DIR  — where to install (default: /usr/local/bin)

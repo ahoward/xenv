@@ -12,13 +12,13 @@ export function wrap_html(body: string, css: string): string {
   <meta name="keywords" content="dotenv alternative, secrets manager, environment variables encryption, mcp secrets tool, encrypted env files, xenv, dotenvx alternative, direnv alternative, ai agent secrets, environment runner, single binary">
   <meta name="theme-color" content="#0d1117">
   <meta name="robots" content="index, follow">
-  <link rel="canonical" href="https://ahoward.github.io/xenv/">
+  <link rel="canonical" href="https://xenv.sh/">
 
   <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:title" content="xenv — dotenv alternative with encryption &amp; AI agent support">
   <meta property="og:description" content="AES-256-GCM encrypted vaults. 7-layer cascade. MCP server for AI agents. Single ~10MB binary, zero dependencies.">
-  <meta property="og:url" content="https://ahoward.github.io/xenv/">
+  <meta property="og:url" content="https://xenv.sh/">
   <meta property="og:site_name" content="xenv">
 
   <!-- Twitter Card -->
@@ -38,8 +38,8 @@ export function wrap_html(body: string, css: string): string {
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Linux, macOS, Windows",
     "description": "AI-native environment runner and secrets manager. Single binary, zero dependencies, AES-256-GCM encrypted vaults, MCP server for AI coding agents.",
-    "url": "https://ahoward.github.io/xenv/",
-    "downloadUrl": "https://ahoward.github.io/xenv/install.sh",
+    "url": "https://xenv.sh/",
+    "downloadUrl": "https://xenv.sh/install.sh",
     "softwareVersion": "1.0.0",
     "license": "https://opensource.org/licenses/MIT",
     "offers": {
@@ -65,7 +65,7 @@ export function wrap_html(body: string, css: string): string {
     <nav>
       <a href="https://github.com/ahoward/xenv">github</a>
       <a href="https://github.com/ahoward/xenv/blob/main/AGENTS.md">agents</a>
-      <a href="/xenv/llms.txt">llms.txt</a>
+      <a href="/llms.txt">llms.txt</a>
     </nav>
   </header>
 

@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://ahoward.github.io/xenv/sitemap.xml
+Sitemap: https://xenv.sh/sitemap.xml

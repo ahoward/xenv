@@ -6,7 +6,7 @@ xenv manages environment variables and encrypted secrets for any project. It rea
 
 ## Quick Start
 
-- Install: `curl -fsSL https://ahoward.github.io/xenv/install.sh | sh`
+- Install: `curl -fsSL https://xenv.sh/install.sh | sh`
 - Init: `xenv init`
 - Run: `xenv @production -- ./server`
 - MCP: `claude mcp add xenv -- xenv mcp`
@@ -15,7 +15,7 @@ xenv manages environment variables and encrypted secrets for any project. It rea
 
 - [README](https://github.com/ahoward/xenv/blob/main/README.md): full documentation — install, usage, encryption, cascade, comparison
 - [AGENTS.md](https://github.com/ahoward/xenv/blob/main/AGENTS.md): AI agent integration guide — commands, code style, security rules, architecture
-- [Full docs (llms-full.txt)](https://ahoward.github.io/xenv/llms-full.txt): complete README + AGENTS.md in plain text
+- [Full docs (llms-full.txt)](https://xenv.sh/llms-full.txt): complete README + AGENTS.md in plain text
 
 ## API
 
@@ -34,7 +34,7 @@ xenv manages environment variables and encrypted secrets for any project. It rea
 
 ## Install
 
-- [install.sh](https://raw.githubusercontent.com/ahoward/xenv/main/install.sh): `curl -fsSL https://ahoward.github.io/xenv/install.sh | sh`
+- [install.sh](https://raw.githubusercontent.com/ahoward/xenv/main/install.sh): `curl -fsSL https://xenv.sh/install.sh | sh`
 - [Build from source](https://github.com/ahoward/xenv#building-from-source): `bun build ./src/cli.ts --compile --minify --outfile=xenv`
 
 ## Source
