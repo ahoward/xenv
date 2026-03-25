@@ -77,7 +77,7 @@ export async function audit_project(cwd: string = process.cwd()): Promise<AuditR
         severity: "warning",
         code: "orphan_vault",
         file,
-        message: `${file} has no decryption key configured — run 'xenv keys @${env_name}' to generate one, or set ${`XENV_KEY_${env_name!.toUpperCase()}`} in your environment`,
+        message: `${file} has no decryption key configured — run 'xenv keygen @${env_name}' to generate one, or set ${`XENV_KEY_${env_name!.toUpperCase()}`} in your environment`,
       });
     }
   }
@@ -165,14 +165,31 @@ function load_gitignore(cwd: string): string[] {
 }
 
 function is_gitignored(file: string, patterns: string[]): boolean {
+  let ignored = false;
+  // process patterns in order — later patterns override earlier ones (including negation)
   for (const pattern of patterns) {
-    // exact match
-    if (pattern === file) return true;
-    // simple wildcard: .xenv.* matches .xenv.production
-    if (pattern.includes("*")) {
-      const regex_str = "^" + pattern.replace(/\./g, "\\.").replace(/\*/g, ".*") + "$";
-      if (new RegExp(regex_str).test(file)) return true;
+    // negation pattern: !pattern un-ignores a file
+    if (pattern.startsWith("!")) {
+      const negated = pattern.slice(1);
+      if (pattern_matches(file, negated)) {
+        ignored = false;
+      }
+      continue;
     }
+    if (pattern_matches(file, pattern)) {
+      ignored = true;
+    }
+  }
+  return ignored;
+}
+
+function pattern_matches(file: string, pattern: string): boolean {
+  // exact match
+  if (pattern === file) return true;
+  // wildcard match
+  if (pattern.includes("*")) {
+    const regex_str = "^" + pattern.replace(/\./g, "\\.").replace(/\*/g, ".*") + "$";
+    if (new RegExp(regex_str).test(file)) return true;
   }
   return false;
 }

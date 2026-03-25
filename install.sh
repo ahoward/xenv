@@ -48,11 +48,40 @@ echo "installing xenv ${TAG} (${PLATFORM}/${ARCH_NAME})"
 echo "  from: ${URL}"
 echo "  to:   ${INSTALL_DIR}/xenv"
 
-# download — use sudo if needed
+# download binary and checksums
 TMPFILE="$(mktemp)"
-trap 'rm -f "$TMPFILE"' EXIT
+TMPCHECK="$(mktemp)"
+trap 'rm -f "$TMPFILE" "$TMPCHECK"' EXIT
 
 curl -fsSL -o "$TMPFILE" "$URL"
+
+CHECKSUM_URL="https://github.com/${REPO}/releases/download/${TAG}/checksums.txt"
+if curl -fsSL -o "$TMPCHECK" "$CHECKSUM_URL" 2>/dev/null; then
+  EXPECTED="$(grep "  ${BINARY}$" "$TMPCHECK" | cut -d ' ' -f 1)"
+  if [ -n "$EXPECTED" ]; then
+    if command -v sha256sum >/dev/null 2>&1; then
+      ACTUAL="$(sha256sum "$TMPFILE" | cut -d ' ' -f 1)"
+    elif command -v shasum >/dev/null 2>&1; then
+      ACTUAL="$(shasum -a 256 "$TMPFILE" | cut -d ' ' -f 1)"
+    else
+      echo "  warning: no sha256sum or shasum found — skipping checksum verification" >&2
+      ACTUAL="$EXPECTED"
+    fi
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+      echo "error: checksum mismatch!" >&2
+      echo "  expected: ${EXPECTED}" >&2
+      echo "  actual:   ${ACTUAL}" >&2
+      echo "  the downloaded binary may be corrupted or tampered with." >&2
+      exit 1
+    fi
+    echo "  checksum: verified ✓"
+  else
+    echo "  warning: binary not found in checksums.txt — skipping verification" >&2
+  fi
+else
+  echo "  warning: checksums.txt not available — skipping verification" >&2
+fi
+
 chmod +x "$TMPFILE"
 
 if [ -w "$INSTALL_DIR" ]; then
@@ -70,4 +99,4 @@ echo "  xenv --version     verify installation"
 echo "  xenv init          bootstrap xenv in your project"
 echo "  xenv --help        see all commands"
 echo ""
-echo "docs: https://github.com/${REPO}"
+echo "docs: https://xenv.sh"

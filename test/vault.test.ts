@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { runEncrypt, runDecrypt, runKeys, decryptVault, resolveKey } from "../src/vault";
+import { runEncrypt, runDecrypt, runKeygen, decryptVault, resolveKey } from "../src/vault";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -60,10 +60,12 @@ describe("vault", () => {
     delete process.env.XENV_KEY_STAGING;
   });
 
-  test("encrypt fails without key", async () => {
+  test("encrypt auto-generates key when none exists", async () => {
     writeFileSync(join(dir, ".xenv.test"), "A=1");
     delete process.env.XENV_KEY_TEST;
-    expect(runEncrypt("test")).rejects.toThrow("encryption key not found");
+    await runEncrypt("test");
+    expect(existsSync(join(dir, ".xenv.test.enc"))).toBe(true);
+    expect(existsSync(join(dir, ".xenv.keys"))).toBe(true);
   });
 
   test("decrypt fails without vault", async () => {
@@ -173,15 +175,17 @@ describe("vault", () => {
     expect(resolveKey("nokey")).toBeUndefined();
   });
 
-  test("encrypt fails when neither specific nor global key is set", async () => {
+  test("encrypt auto-generates key when neither specific nor global key is set", async () => {
     writeFileSync(join(dir, ".xenv.nokey"), "A=1");
     delete process.env.XENV_KEY_NOKEY;
     delete process.env.XENV_KEY;
-    expect(runEncrypt("nokey")).rejects.toThrow("encryption key not found");
+    await runEncrypt("nokey");
+    expect(existsSync(join(dir, ".xenv.nokey.enc"))).toBe(true);
+    expect(existsSync(join(dir, ".xenv.keys"))).toBe(true);
   });
 
-  test("keys writes key to .xenv.keys file", async () => {
-    await runKeys("production");
+  test("keygen writes key to .xenv.keys file", async () => {
+    await runKeygen("production");
 
     const keysPath = join(dir, ".xenv.keys");
     expect(existsSync(keysPath)).toBe(true);
@@ -202,12 +206,12 @@ describe("vault", () => {
     expect(mode).toBe(0o600);
   });
 
-  test("keys replaces existing key for same env", async () => {
-    await runKeys("staging");
+  test("keygen replaces existing key for same env", async () => {
+    await runKeygen("staging");
     const first = readFileSync(join(dir, ".xenv.keys"), "utf-8");
     const firstMatch = first.match(/XENV_KEY_STAGING="([a-f0-9]{64})"/);
 
-    await runKeys("staging");
+    await runKeygen("staging");
     const second = readFileSync(join(dir, ".xenv.keys"), "utf-8");
     const secondMatch = second.match(/XENV_KEY_STAGING="([a-f0-9]{64})"/);
 
@@ -218,9 +222,9 @@ describe("vault", () => {
     expect(count).toBe(1);
   });
 
-  test("keys appends multiple envs to same file", async () => {
-    await runKeys("production");
-    await runKeys("staging");
+  test("keygen appends multiple envs to same file", async () => {
+    await runKeygen("production");
+    await runKeygen("staging");
 
     const content = readFileSync(join(dir, ".xenv.keys"), "utf-8");
     expect(content).toContain("XENV_KEY_PRODUCTION=");
@@ -265,7 +269,7 @@ describe("vault", () => {
     delete process.env.XENV_KEY;
 
     // generate key into .xenv.keys
-    await runKeys("roundtrip");
+    await runKeygen("roundtrip");
 
     // write plaintext
     writeFileSync(join(dir, ".xenv.roundtrip"), "SECRET=fromfile");

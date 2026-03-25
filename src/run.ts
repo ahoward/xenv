@@ -32,12 +32,13 @@ export async function run(
     handlers.push([signal, handler]);
   }
 
-  const exitCode = await proc.exited;
-
-  // remove signal handlers to avoid listener leaks
-  for (const [signal, handler] of handlers) {
-    process.removeListener(signal, handler);
+  try {
+    const exitCode = await proc.exited;
+    return exitCode;
+  } finally {
+    // remove signal handlers to avoid listener leaks
+    for (const [signal, handler] of handlers) {
+      process.removeListener(signal, handler);
+    }
   }
-
-  return exitCode;
 }

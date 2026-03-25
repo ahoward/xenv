@@ -49,7 +49,7 @@ export async function diff_env(
     const key = resolveKey(env, cwd);
     if (!key) {
       throw new Error(
-        `vault exists but decryption key not found: ${keyEnvNames(env)} — run 'xenv keys @${env}' to generate one`
+        `vault exists but decryption key not found: ${keyEnvNames(env)} — run 'xenv keygen @${env}' to generate one`
       );
     }
     const decrypted = await decryptVault(enc_path, key);

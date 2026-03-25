@@ -1,7 +1,7 @@
 {
   "name": "xenv",
   "version": "1.0.0",
-  "description": "blazing-fast, zero-dependency environment runner and secrets manager",
+  "description": "AI-native secrets manager with AES-256-GCM encryption, MCP server, and zero dependencies. Drop-in dotenv alternative.",
   "type": "module",
   "main": "src/cli.ts",
   "bin": {
@@ -43,7 +43,7 @@
     "type": "git",
     "url": "https://github.com/ahoward/xenv.git"
   },
-  "homepage": "https://github.com/ahoward/xenv",
+  "homepage": "https://xenv.sh",
   "bugs": {
     "url": "https://github.com/ahoward/xenv/issues"
   },

@@ -147,6 +147,18 @@ describe("parseEnvContent", () => {
     expect(result.constructor).toBeUndefined();
   });
 
+  test("escaped quotes in double-quoted value", () => {
+    expect(parseEnvContent('KEY="value with \\"escaped\\""')).toEqual({ KEY: 'value with "escaped"' });
+  });
+
+  test("escaped backslash in double-quoted value", () => {
+    expect(parseEnvContent('KEY="path\\\\to\\\\file"')).toEqual({ KEY: "path\\to\\file" });
+  });
+
+  test("single-quoted value does not expand escaped quotes", () => {
+    expect(parseEnvContent("KEY='no \\\"escapes\\\" here'")).toEqual({ KEY: 'no \\"escapes\\" here' });
+  });
+
   test("empty input returns empty object", () => {
     expect(parseEnvContent("")).toEqual({});
   });

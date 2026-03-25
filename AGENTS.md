@@ -75,7 +75,7 @@ state lives in `bny/`. do not modify state files directly.
 | `xenv init [@env]` | bootstrap xenv in a project | `xenv init` |
 | `xenv encrypt @env` | encrypt plaintext to vault | `xenv encrypt @production` |
 | `xenv decrypt @env` | decrypt vault to plaintext | `xenv decrypt @production` |
-| `xenv keys @env` | generate an encryption key | `xenv keys @production` |
+| `xenv keygen @env` | generate an encryption key | `xenv keygen @production` |
 | `xenv edit @env set K=V` | set a secret without decrypting to disk | `xenv edit @production set API_KEY=sk_live_...` |
 | `xenv edit @env delete K` | remove a secret from vault | `xenv edit @production delete OLD_KEY` |
 | `xenv edit @env list` | list vault key names (no values) | `xenv edit @production list --json` |

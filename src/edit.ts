@@ -63,7 +63,7 @@ async function load_vault(env: string, cwd: string): Promise<{ data: Record<stri
   if (!key) {
     throw new Error(
       `encryption key not found: ${keyEnvNames(env)}\n` +
-      `run 'xenv keys @${env}' to generate one`
+      `run 'xenv keygen @${env}' to generate one`
     );
   }
 

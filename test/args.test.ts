@@ -27,9 +27,9 @@ describe("parseArgs", () => {
     expect(r.env).toBe("staging");
   });
 
-  test("keys command", () => {
-    const r = parseArgs(["keys", "@production"]);
-    expect(r.command).toBe("keys");
+  test("keygen command", () => {
+    const r = parseArgs(["keygen", "@production"]);
+    expect(r.command).toBe("keygen");
     expect(r.env).toBe("production");
   });
 
@@ -71,6 +71,19 @@ describe("parseArgs", () => {
   test("exec with multiple args after --", () => {
     const r = parseArgs(["@test", "--", "node", "app.js", "--port", "3000"]);
     expect(r.exec).toEqual(["node", "app.js", "--port", "3000"]);
+  });
+
+  test("rotate command with @env", () => {
+    const r = parseArgs(["rotate", "@production"]);
+    expect(r.command).toBe("rotate");
+    expect(r.env).toBe("production");
+  });
+
+  test("rotate command with --json", () => {
+    const r = parseArgs(["@staging", "rotate", "--json"]);
+    expect(r.command).toBe("rotate");
+    expect(r.env).toBe("staging");
+    expect(r.json).toBe(true);
   });
 
   test("bare @ produces empty env name", () => {

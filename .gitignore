@@ -3,13 +3,16 @@ bny/bny.pid
 bny/children/
 # bny:end
 
-# secrets
-.envrc
+# secrets — block everything, then allow only encrypted vaults
 .xenv.keys
-.env*.local
-.xenv*.local
-.xenv.production
-.xenv.staging
+.xenv.*
+.env.*
+.env.local
+.envrc
+!.xenv.*.enc
+
+# editor/tool local state
+.claude/settings.local.json*
 
 # build artifacts
 xenv

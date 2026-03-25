@@ -8,11 +8,11 @@
 xenv @production -- ./server
 ```
 
+**the first secrets manager built for AI agents.** built-in [MCP server](#xenv-mcp--model-context-protocol-server) with 10 tools. `--json` on every command. atomic edits that never write plaintext to disk. audit guardrails that catch agent mistakes before they ship. works with Claude Code, Cursor, Windsurf, Copilot, Cline, Aider, Continue, Zed, and RooCode — out of the box.
+
 one argument names the environment. everything after `--` runs inside it. encrypted secrets are decrypted in memory, merged through a 7-layer cascade, and injected into the child process. decrypted secrets never touch disk at runtime.
 
-single binary. ~10MB. zero dependencies. sub-millisecond startup. nothing to install except the binary itself.
-
-xenv is the secrets manager built for AI coding agents — with a built-in MCP server, `--json` output on every command, and guardrails that prevent agents from leaking keys.
+single self-contained binary. ~10MB. zero runtime dependencies. nothing to install except the binary itself.
 
 ---
 
@@ -22,20 +22,21 @@ xenv is the secrets manager built for AI coding agents — with a built-in MCP s
 # install
 curl -fsSL https://xenv.sh/install.sh | sh
 
-# create an environment
-echo 'DATABASE_URL="postgres://localhost/myapp"' > .xenv.development
+# bootstrap (creates .gitignore, key, and starter .xenv.development)
+xenv init
 
-# run a command with it
+# add your secrets
+echo 'DATABASE_URL="postgres://localhost/myapp"' >> .xenv.development
+
+# encrypt (auto-generates a key if needed)
+xenv encrypt @development
+
+# run
 xenv @development -- env | grep DATABASE_URL
 # → DATABASE_URL=postgres://localhost/myapp
-
-# encrypt it
-xenv keys @development
-xenv encrypt @development
-# .xenv.development.enc is safe to commit. done.
 ```
 
-that's 4 commands from nothing to encrypted secrets running in a child process.
+that's 4 commands from nothing to encrypted secrets running in a child process. the `.enc` vault is safe to commit — `.gitignore` is already set up.
 
 ---
 
@@ -46,7 +47,7 @@ you've been here: secrets in plaintext `.env` files, committed to git by acciden
 every env/secrets tool makes you pick two:
 
 - **dotenv** — simple but no encryption, no execution wrapper, requires Node.js or Ruby in your image
-- **dotenvx** — adds encryption but ships a ~50MB binary (bundled Node.js via pkg), invented `encrypted:` prefixes that choke Vercel/Netlify/Heroku parsers, ECIES is overkill for symmetric secrets
+- **dotenvx** — adds encryption but ships a ~20MB binary (bundled Node.js via pkg), puts `encrypted:` prefixes inline in `.env` files that [confuse platform parsers](https://github.com/dotenvx/dotenvx/issues/616), ECIES is overkill for symmetric secrets
 - **direnv** — brilliant shell hook but no encryption, no named environments, requires `direnv allow` after every edit, can't export functions
 - **senv** — elegant `@env` execution model but requires Ruby, Blowfish-CBC is showing its age
 - **sekrets** — pioneered encrypted config in Ruby but it's a library, not a runner
@@ -73,8 +74,8 @@ no other env tool has any of these.
 
 | | xenv | dotenvx | senv | direnv | dotenv | 1Password CLI |
 |---|---|---|---|---|---|---|
-| **binary size** | ~10 MB | ~50 MB | gem install | ~10 MB | npm/gem | ~100 MB |
-| **runtime deps** | none | Node.js (bundled) | Ruby | none | Node.js or Ruby | none (but needs account) |
+| **binary size** | ~10 MB | ~20 MB | gem install | ~10 MB | npm/gem | ~100 MB |
+| **runtime deps** | none | Node.js (bundled via pkg) | Ruby | none | Node.js or Ruby | none (but needs account) |
 | **encryption** | AES-256-GCM | ECIES (secp256k1) | Blowfish-CBC | none | none | vault-based |
 | **named envs** | `@production` | `-f .env.production` | `@production` | directory-based | manual | `op://vault/item` |
 | **execution wrapper** | `xenv @env -- cmd` | `dotenvx run -- cmd` | `senv @env cmd` | shell hook | none | `op run -- cmd` |
@@ -83,9 +84,9 @@ no other env tool has any of these.
 | **zero-disk secrets** | yes | yes | yes | n/a | n/a | yes |
 | **key management** | `XENV_KEY_{ENV}` or `XENV_KEY` | `.env.keys` + `DOTENV_PRIVATE_KEY_{ENV}` | `.senv/.key` | n/a | n/a | 1Password account |
 | **platforms** | linux, mac, windows | linux, mac, windows | anywhere Ruby runs | linux, mac | anywhere | linux, mac, windows |
-| **signal forwarding** | yes | partial (open issues) | yes | n/a | n/a | yes |
+| **signal forwarding** | yes | partial ([#730](https://github.com/dotenvx/dotenvx/issues/730)) | yes | n/a | n/a | yes |
 | **AI agent support** | MCP server + `--json` | none | none | none | none | none |
-| **atomic secret edit** | `edit set` (zero-disk) | none | none | none | none | none |
+| **atomic secret edit** | `edit set` (zero-disk) | `dotenvx set` (writes `.env`) | none | none | none | none |
 | **security audit** | `xenv audit` | none | none | none | none | none |
 | **cost** | free | free | free | free | free | $4+/user/mo |
 
@@ -121,7 +122,7 @@ xenv inherits stdin, stdout, stderr. signals (SIGINT, SIGTERM, SIGHUP) forward t
 ### manage encrypted vaults
 
 ```bash
-xenv keys    @production    # generate a 256-bit key (saves to .xenv.keys)
+xenv keygen    @production    # generate a 256-bit key (saves to .xenv.keys)
 xenv encrypt @production    # .xenv.production → .xenv.production.enc
 xenv decrypt @production    # .xenv.production.enc → .xenv.production
 ```
@@ -163,7 +164,7 @@ no `--env-file .env.production -f .env`. no `DOTENV_KEY=`. no `--convention=next
 
 ## the `.xenv` file extension
 
-platforms like Vercel, Netlify, and Heroku auto-parse `.env` files on deploy. when those files contain encrypted strings (like dotenvx's `encrypted:...` values), the platform chokes.
+platforms like Vercel, Netlify, and Heroku auto-parse `.env` files on deploy. when those files contain encrypted strings (like dotenvx's inline `encrypted:...` values), the platform [sees ciphertext instead of secrets](https://github.com/dotenvx/dotenvx/issues/616).
 
 xenv introduces `.xenv` — functionally identical to `.env` but invisible to platform parsers. same syntax. same semantics. new extension.
 
@@ -215,15 +216,15 @@ xenv looks for keys in this order. first match wins.
 |---|---|---|
 | 1 | `XENV_KEY_{ENV}` in process env | `XENV_KEY_PRODUCTION` set in shell/CI |
 | 2 | `XENV_KEY` in process env | `XENV_KEY` set in shell/CI |
-| 3 | `XENV_KEY_{ENV}` in `.xenv.keys` | written by `xenv keys @production` |
+| 3 | `XENV_KEY_{ENV}` in `.xenv.keys` | written by `xenv keygen @production` |
 | 4 | `XENV_KEY` in `.xenv.keys` | a single key in the keyfile |
 
 ### `.xenv.keys` — the project keyfile
 
-`xenv keys @production` generates a key and writes it to `.xenv.keys` in your project root:
+`xenv keygen @production` generates a key and writes it to `.xenv.keys` in your project root:
 
 ```bash
-$ xenv keys @production
+$ xenv keygen @production
 XENV_KEY_PRODUCTION → .xenv.keys
 
 for CI, set this secret:
@@ -269,7 +270,7 @@ the AI-agent block is intentional — LLMs are the most likely thing to `git add
 - process env vars always take precedence (for CI/Docker overrides)
 - the header includes full usage docs so the file is self-explanatory
 
-for local development, this is all you need. run `xenv keys`, then `xenv encrypt`, then `xenv @env -- cmd`. no exporting env vars. no copy-pasting. the keyfile just works.
+for local development, this is all you need. run `xenv keygen`, then `xenv encrypt`, then `xenv @env -- cmd`. no exporting env vars. no copy-pasting. the keyfile just works.
 
 for CI/production, copy the key value into your platform's secret store as an env var. the keyfile doesn't need to exist there — the env var takes precedence.
 
@@ -285,7 +286,7 @@ XENV_KEY="9a3f..."
 **per-env keys (isolation).** a compromised staging key can't decrypt production secrets.
 
 ```bash
-# .xenv.keys (written automatically by xenv keys)
+# .xenv.keys (written automatically by xenv keygen)
 XENV_KEY_PRODUCTION="9a3f..."
 XENV_KEY_STAGING="b7c1..."
 ```
@@ -311,7 +312,7 @@ STRIPE_KEY="sk_live_abc123"
 **step 2: generate a key.**
 
 ```bash
-$ xenv keys @production
+$ xenv keygen @production
 XENV_KEY_PRODUCTION → .xenv.keys
 
 for CI, set this secret:
@@ -332,13 +333,11 @@ xenv finds the key in `.xenv.keys`, encrypts `.xenv.production`, writes `.xenv.p
 **step 4: commit the vault, gitignore the rest.**
 
 ```bash
-# make sure secrets and keyfile are never committed
-echo ".xenv.keys" >> .gitignore
-echo ".xenv.production" >> .gitignore
-
 git add .xenv.production.enc .gitignore
 git commit -m "add production vault"
 ```
+
+xenv's recommended `.gitignore` pattern blocks all plaintext and keys by default — only `.xenv.*.enc` vaults pass through. `xenv init` sets this up automatically.
 
 **step 5: set the key in CI/production.**
 
@@ -414,28 +413,30 @@ one key per environment — or one key for everything. your call.
 
 ```
 your-project/
-├── .xenv.keys                  # encryption keys (gitignored, chmod 600)
-├── .env                        # legacy base defaults (committed)
-├── .xenv                       # modern base defaults (committed)
-├── .xenv.production            # prod plaintext (gitignored)
-├── .xenv.production.enc        # prod vault (committed)
-├── .xenv.staging               # staging plaintext (gitignored)
-├── .xenv.staging.enc           # staging vault (committed)
-├── .xenv.development           # dev config (committed, no secrets)
-├── .xenv.local                 # your machine only (gitignored)
-└── .gitignore
+├── .gitignore
+├── .xenv.keys                  # ✗ gitignored — encryption keys (chmod 600)
+├── .env                        # ✓ committed  — legacy base defaults
+├── .xenv                       # ✓ committed  — modern base defaults
+├── .xenv.production            # ✗ gitignored — prod plaintext
+├── .xenv.production.enc        # ✓ committed  — prod vault (safe, encrypted)
+├── .xenv.staging               # ✗ gitignored — staging plaintext
+├── .xenv.staging.enc           # ✓ committed  — staging vault (safe, encrypted)
+├── .xenv.development           # ✗ gitignored — dev plaintext (use .xenv for shared defaults)
+├── .xenv.local                 # ✗ gitignored — your machine only
+└── .env.local                  # ✗ gitignored — your machine only
 ```
 
 **.gitignore:**
 ```
 .xenv.keys
-.xenv.*.local
-.env.*.local
+.xenv.*
+.env.*
 .env.local
-.xenv.local
-.xenv.production
-.xenv.staging
+.envrc
+!.xenv.*.enc
 ```
+
+this pattern ignores everything dangerous by default and only allows encrypted vaults through. no matter what environment names you invent, the plaintext is ignored and the vault is safe to commit.
 
 ---
 
@@ -637,7 +638,7 @@ MIT
 
 ```bash
 curl -fsSL https://xenv.sh/install.sh | sh
-xenv keys @production
+xenv init @production
 xenv encrypt @production
 xenv @production -- ./server
 ```

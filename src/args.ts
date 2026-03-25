@@ -1,6 +1,6 @@
 export interface ParsedArgs {
   env: string;
-  command: string | null; // "encrypt" | "decrypt" | "keys" | "edit" | "diff" | "validate" | "audit" | "resolve" | "mcp"
+  command: string | null; // "encrypt" | "decrypt" | "keygen" | "edit" | "diff" | "validate" | "audit" | "resolve" | "mcp"
   subcommand: string | null; // "set" | "delete" | "list" (for edit)
   exec: string[];
   positional: string[]; // KEY=VALUE for edit set, KEY for edit delete
@@ -11,8 +11,8 @@ export interface ParsedArgs {
 }
 
 const COMMANDS = new Set([
-  "encrypt", "decrypt", "keys", "init",
-  "edit", "diff", "validate", "audit", "resolve", "mcp",
+  "encrypt", "decrypt", "keygen", "init",
+  "edit", "diff", "validate", "audit", "resolve", "rotate", "mcp",
 ]);
 
 const SUBCOMMANDS = new Set(["set", "delete", "list"]);
@@ -67,7 +67,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
     // @env syntax
     if (arg.startsWith("@")) {
-      env = arg.slice(1);
+      const name = arg.slice(1);
+      if (name.includes("/") || name.includes("\\") || name.includes("..") || name.includes("\0")) {
+        throw new Error(`invalid environment name: ${name} — use alphanumeric names like 'production', 'staging', 'test'`);
+      }
+      env = name;
       i++;
       continue;
     }

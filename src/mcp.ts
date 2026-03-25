@@ -5,17 +5,18 @@
  * Exposes xenv operations as MCP tools for Claude Code, Cursor, etc.
  */
 
-import { resolveEnv } from "./resolve";
+import { resolveCascadeOnly } from "./resolve";
 import { edit_set, edit_delete, edit_list } from "./edit";
 import { rotate_vault_key, runEncrypt } from "./vault";
 import { audit_project } from "./audit";
 import { validate_env } from "./validate";
 import { diff_env } from "./diff";
 import { run_init } from "./init";
+import pkg from "../package.json";
 
 const MCP_VERSION = "2024-11-05";
 const SERVER_NAME = "xenv";
-const SERVER_VERSION = "1.0.0";
+const SERVER_VERSION = pkg.version;
 
 // ── JSON-RPC 2.0 types ──────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ const TOOLS: McpTool[] = [
   },
   {
     name: "resolve_env",
-    description: "Resolve the full 7-layer environment cascade for a given environment. Returns all merged key-value pairs as a JSON object. System env vars are included. Common env names: production, staging, development.",
+    description: "Resolve the 7-layer environment cascade for a given environment. Returns merged key-value pairs from cascade files only (system env vars are excluded for safety). Common env names: production, staging, development.",
     inputSchema: {
       type: "object",
       properties: {
@@ -66,7 +67,7 @@ const TOOLS: McpTool[] = [
   },
   {
     name: "set_secret",
-    description: "Set or update a secret in an encrypted vault. Creates the key if it doesn't exist in the vault. The vault (.xenv.{env}.enc) must already exist — use 'init' to bootstrap first. Plaintext never touches disk.",
+    description: "Set or update a secret in an encrypted vault. Creates the key if it doesn't exist in the vault. The vault (.xenv.{env}.enc) must already exist — use 'init' to bootstrap, then 'encrypt' to create the vault. Plaintext never touches disk.",
     inputSchema: {
       type: "object",
       properties: {
@@ -113,12 +114,12 @@ const TOOLS: McpTool[] = [
   },
   {
     name: "diff",
-    description: "Compare the plaintext .xenv.{env} file against the encrypted .xenv.{env}.enc vault. Returns added, removed, and changed keys. Use keys_only=true to omit secret values from the response.",
+    description: "Compare the plaintext .xenv.{env} file against the encrypted .xenv.{env}.enc vault. Returns added, removed, and changed keys. keys_only defaults to true (safe — no secret values in response). Set keys_only=false only if you need actual values.",
     inputSchema: {
       type: "object",
       properties: {
         env: { type: "string", description: "Environment name" },
-        keys_only: { type: "boolean", description: "If true, omit secret values from the diff. Defaults to false." },
+        keys_only: { type: "boolean", description: "If true, omit secret values from the diff. Defaults to true for safety." },
       },
       required: ["env"],
     },
@@ -172,7 +173,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   },
   resolve_env: async (args) => {
     const env = String(args.env ?? "development");
-    return await resolveEnv(env);
+    return await resolveCascadeOnly(env);
   },
   set_secret: async (args) => {
     const env = String(args.env);
@@ -197,12 +198,13 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   },
   diff: async (args) => {
     const env = String(args.env);
-    const keys_only = Boolean(args.keys_only ?? false);
+    const keys_only = Boolean(args.keys_only ?? true);
     return await diff_env(env, keys_only);
   },
   rotate_key: async (args) => {
     const env = String(args.env);
-    return await rotate_vault_key(env);
+    await rotate_vault_key(env);
+    return { ok: true, env, message: `key rotated for @${env} — new key saved to .xenv.keys. re-distribute to CI/production.` };
   },
   audit: async () => {
     return await audit_project();
@@ -243,6 +245,31 @@ function handle_tools_list(): unknown {
 async function handle_tools_call(params: Record<string, unknown>): Promise<unknown> {
   const name = String(params.name ?? "");
   const args = (params.arguments ?? {}) as Record<string, unknown>;
+
+  // validate env name if present (prevent path traversal)
+  if (args.env !== undefined && args.env !== null) {
+    const env_str = String(args.env);
+    if (env_str.includes("/") || env_str.includes("\\") || env_str.includes("..") || env_str.includes("\0")) {
+      return {
+        content: [{ type: "text", text: `invalid environment name: ${env_str} — use alphanumeric names like 'production', 'staging', 'test'` }],
+        isError: true,
+      };
+    }
+  }
+
+  // validate required parameters
+  const tool_def = TOOLS.find(t => t.name === name);
+  if (tool_def) {
+    const required = (tool_def.inputSchema as { required?: string[] }).required ?? [];
+    for (const param of required) {
+      if (args[param] === undefined || args[param] === null || args[param] === "") {
+        return {
+          content: [{ type: "text", text: `missing required parameter: ${param}` }],
+          isError: true,
+        };
+      }
+    }
+  }
 
   const handler = TOOL_HANDLERS[name];
   if (!handler) {

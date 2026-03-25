@@ -1,13 +1,14 @@
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { runKeys } from "./vault";
+import { runKeygen } from "./vault";
 
 const GITIGNORE_ENTRIES = [
   ".xenv.keys",
-  ".env*.local",
-  ".xenv*.local",
-  ".xenv.production",
-  ".xenv.staging",
+  ".xenv.*",
+  ".env.*",
+  ".env.local",
+  ".envrc",
+  "!.xenv.*.enc",
 ];
 
 /**
@@ -31,7 +32,7 @@ export async function run_init(env: string = "development", cwd: string = proces
   // 2. generate key (if .xenv.keys doesn't exist)
   const keys_path = join(cwd, ".xenv.keys");
   if (!existsSync(keys_path)) {
-    await runKeys(env);
+    await runKeygen(env, true);
     created.push(".xenv.keys               encryption keys (gitignored, chmod 600)");
   } else {
     skipped.push(".xenv.keys               already exists");
@@ -96,7 +97,6 @@ function ensure_gitignore(path: string): boolean {
     missing.join("\n") +
     "\n";
 
-  const fs = require("fs");
-  fs.writeFileSync(path, content + addition);
+  writeFileSync(path, content + addition);
   return true;
 }

@@ -59,12 +59,66 @@ export async function resolveEnv(
       const parsed = parseEnvContent(decrypted);
       Object.assign(merged, parsed);
     } else {
-      console.error(`xenv: warning: vault .xenv.${env}.enc exists but ${keyEnvNames(env)} is not set — run 'xenv keys @${env}' to generate a key, or set the env var in your shell`);
+      console.error(`xenv: warning: vault .xenv.${env}.enc exists but ${keyEnvNames(env)} is not set — run 'xenv keygen @${env}' to generate a key, or set the env var in your shell`);
     }
   }
 
   // 7. system ENV wins last
   Object.assign(merged, process.env);
+
+  return merged;
+}
+
+/**
+ * Resolve environment variables but only return keys defined in cascade files.
+ * Excludes system env vars that aren't part of the project config.
+ * Safe for display, --json output, and MCP responses.
+ */
+export async function resolveCascadeOnly(
+  env: string,
+  cwd: string = process.cwd()
+): Promise<Record<string, string>> {
+  if (env.includes("/") || env.includes("\\") || env.includes("..")) {
+    throw new Error(`invalid environment name: ${env} — use alphanumeric names like 'production', 'staging', 'test'`);
+  }
+  const merged: Record<string, string> = Object.create(null);
+
+  const cascadeFiles = [
+    [".env"],
+    [".xenv"],
+    [".env.local", ".xenv.local"],
+    [`.env.${env}`, `.xenv.${env}`],
+    [],
+    [`.env.${env}.local`, `.xenv.${env}.local`],
+  ];
+
+  for (const group of cascadeFiles) {
+    for (const file of group) {
+      const path = join(cwd, file);
+      if (existsSync(path)) {
+        const content = await Bun.file(path).text();
+        const parsed = parseEnvContent(content);
+        Object.assign(merged, parsed);
+      }
+    }
+  }
+
+  const encPath = join(cwd, `.xenv.${env}.enc`);
+  if (existsSync(encPath)) {
+    const key = resolveKey(env, cwd);
+    if (key) {
+      const decrypted = await decryptVault(encPath, key);
+      const parsed = parseEnvContent(decrypted);
+      Object.assign(merged, parsed);
+    }
+  }
+
+  // system ENV overrides only for keys that exist in cascade
+  for (const key of Object.keys(merged)) {
+    if (process.env[key] !== undefined) {
+      merged[key] = process.env[key]!;
+    }
+  }
 
   return merged;
 }

@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from "./args";
-import { resolveEnv } from "./resolve";
-import { runEncrypt, runDecrypt, runKeys } from "./vault";
+import { resolveEnv, resolveCascadeOnly } from "./resolve";
+import { runEncrypt, runDecrypt, runKeygen, rotate_vault_key } from "./vault";
 import { run } from "./run";
 import { edit_set, edit_delete, edit_list } from "./edit";
 import { diff_env, format_diff } from "./diff";
@@ -11,8 +11,9 @@ import { audit_project, format_audit } from "./audit";
 import { run_mcp_server } from "./mcp";
 import { run_init } from "./init";
 import { print_output } from "./output";
+import pkg from "../package.json";
 
-const VERSION = "1.0.0";
+const VERSION = pkg.version;
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
@@ -30,22 +31,34 @@ async function main(): Promise<void> {
   // init command
   if (args.command === "init") {
     await run_init(args.env);
+    if (args.json) console.log(JSON.stringify({ ok: true, env: args.env }));
     process.exit(0);
   }
 
   // vault commands
   if (args.command === "encrypt") {
     await runEncrypt(args.env);
+    if (args.json) console.log(JSON.stringify({ ok: true, env: args.env, file: `.xenv.${args.env}.enc` }));
     process.exit(0);
   }
 
   if (args.command === "decrypt") {
     await runDecrypt(args.env);
+    if (args.json) console.log(JSON.stringify({ ok: true, env: args.env, file: `.xenv.${args.env}` }));
     process.exit(0);
   }
 
-  if (args.command === "keys") {
-    await runKeys(args.env);
+  if (args.command === "keygen") {
+    await runKeygen(args.env);
+    if (args.json) console.log(JSON.stringify({ ok: true, env: args.env, key_name: `XENV_KEY_${args.env.toUpperCase()}` }));
+    process.exit(0);
+  }
+
+  // rotate command
+  if (args.command === "rotate") {
+    await rotate_vault_key(args.env);
+    if (args.json) console.log(JSON.stringify({ ok: true, env: args.env }));
+    console.error(`key rotated for @${args.env} — new key saved to .xenv.keys`);
     process.exit(0);
   }
 
@@ -89,7 +102,7 @@ async function main(): Promise<void> {
 
   // resolve command
   if (args.command === "resolve") {
-    const env = await resolveEnv(args.env);
+    const env = await resolveCascadeOnly(args.env);
     print_output(env, args.json, (d) => {
       return Object.entries(d as Record<string, string>)
         .sort(([a], [b]) => a.localeCompare(b))
@@ -153,15 +166,16 @@ function printUsage(): void {
 xenv — environment runner & secrets manager
 
 commands:
-  xenv [@env] -- <command>              run a command with the resolved environment
+  xenv [@env] -- <command>              run a command (defaults to @development)
   xenv init     [@env]                  bootstrap xenv in a project
   xenv encrypt  @env                    encrypt .xenv.{env} to .xenv.{env}.enc
   xenv decrypt  @env                    decrypt .xenv.{env}.enc to .xenv.{env}
-  xenv keys     @env                    generate a 256-bit encryption key
+  xenv keygen   @env                    generate a 256-bit encryption key
   xenv edit     @env <set|delete|list>  edit secrets without decrypting to disk
   xenv resolve  @env [--json]           dump the merged 7-layer cascade
   xenv diff     @env [--keys-only]      compare plaintext vs encrypted vault
   xenv validate @env [--require K,...]  pre-flight check for missing/empty keys
+  xenv rotate   @env                    rotate encryption key (re-encrypts vault)
   xenv audit    [--json]                scan project for security mistakes
   xenv mcp                              start MCP server (JSON-RPC 2.0 stdio)
 

@@ -3,10 +3,11 @@ const ESCAPE_MAP: Record<string, string> = {
   "\\t": "\t",
   "\\r": "\r",
   "\\\\": "\\",
+  '\\"': '"',
 };
 
 function expandEscapes(value: string): string {
-  return value.replace(/\\[ntr\\]/g, (match) => ESCAPE_MAP[match] ?? match);
+  return value.replace(/\\[ntr\\"]/g, (match) => ESCAPE_MAP[match] ?? match);
 }
 
 /**
@@ -54,7 +55,7 @@ export function parseEnvContent(content: string): Record<string, string> {
     if (quote === '"' || quote === "'" || quote === "`") {
       // check if the last char on this line is the closing quote
       // (and the value is more than just the quote char itself)
-      if (value.length > 1 && value[value.length - 1] === quote) {
+      if (value.length > 1 && value[value.length - 1] === quote && value[value.length - 2] !== "\\") {
         // single-line quoted
         value = value.slice(1, -1);
       } else {
@@ -63,7 +64,8 @@ export function parseEnvContent(content: string): Record<string, string> {
         while (i < lines.length) {
           const nextLine = lines[i];
           i++;
-          if (nextLine.trimEnd().endsWith(quote)) {
+          const trimmed = nextLine.trimEnd();
+          if (trimmed.endsWith(quote) && (trimmed.length < 2 || trimmed[trimmed.length - 2] !== "\\")) {
             parts.push(nextLine.trimEnd().slice(0, -1));
             break;
           }

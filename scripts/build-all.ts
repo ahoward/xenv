@@ -8,7 +8,7 @@
  * Output: dist/xenv-{platform}-{arch}
  */
 
-import { mkdirSync, existsSync } from "fs";
+import { mkdirSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const ENTRY = "./src/cli.ts";
@@ -66,6 +66,20 @@ async function main() {
   if (failed > 0) {
     process.exit(1);
   }
+
+  // generate checksums.txt
+  console.log("\ngenerating checksums.txt");
+  const lines: string[] = [];
+  for (const target of TARGETS) {
+    const outfile = join(OUT_DIR, target.name);
+    if (!existsSync(outfile)) continue;
+    const bytes = await Bun.file(outfile).arrayBuffer();
+    const hash = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+    lines.push(`${hash}  ${target.name}`);
+  }
+  const checksums_path = join(OUT_DIR, "checksums.txt");
+  writeFileSync(checksums_path, lines.join("\n") + "\n");
+  console.log(`  ${checksums_path} (${lines.length} entries)`);
 }
 
 main();
