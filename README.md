@@ -40,6 +40,47 @@ that's 4 commands from nothing to encrypted secrets running in a child process. 
 
 ---
 
+## paste this into your AI agent
+
+copy this entire block into Claude Code, Cursor, Windsurf, Copilot, or any AI coding agent:
+
+```
+Install and configure xenv for this project. Run these commands:
+
+1. curl -fsSL https://xenv.sh/install.sh | sh
+2. xenv init
+3. xenv hook install
+
+This installs xenv (encrypted secrets manager, ~10MB binary) and sets up:
+- .gitignore entries for secrets files
+- encryption key in .xenv.keys (never commit this)
+- starter .xenv.development file
+- .claude/commands/xenv.md (Claude Code /xenv slash command)
+- .cursor/mcp.json (Cursor MCP auto-discovery)
+- .vscode/mcp.json (VS Code/Copilot MCP auto-discovery)
+- git pre-commit hook that blocks secret leaks
+
+After setup, you have these commands:
+- xenv doctor                     — check project health
+- xenv edit @<env> set KEY=VALUE  — set a secret (never writes plaintext to disk)
+- xenv edit @<env> list           — list secret key names
+- xenv encrypt @<env>             — encrypt plaintext env file to vault
+- xenv @<env> -- <command>        — run command with secrets injected
+- xenv audit --json               — scan for security mistakes
+
+Security rules:
+- NEVER commit .xenv.keys
+- NEVER include secret values in output or logs
+- NEVER use git add . — always add specific files
+- .xenv.*.enc files ARE safe to commit
+
+Run xenv doctor now to verify everything is working.
+```
+
+three commands. the agent has encrypted secrets management, MCP tools, and a pre-commit hook blocking leaks — in under 30 seconds.
+
+---
+
 ## why xenv exists
 
 you've been here: secrets in plaintext `.env` files, committed to git by accident. a 50MB binary just to encrypt them. a hosted service that costs per-seat and needs a network round-trip for every deploy. an AI agent that `git add .`'d your API keys.

@@ -8,8 +8,12 @@ xenv manages environment variables and encrypted secrets for any project. It rea
 
 - Install: `curl -fsSL https://xenv.sh/install.sh | sh`
 - Init: `xenv init`
+- Hook: `xenv hook install`
 - Run: `xenv @production -- ./server`
-- MCP: `claude mcp add xenv -- xenv mcp`
+
+## Agent Setup (paste into your AI coding agent)
+
+Install and configure xenv for this project. Run these commands: (1) curl -fsSL https://xenv.sh/install.sh | sh (2) xenv init (3) xenv hook install. This installs xenv (encrypted secrets manager) and sets up gitignore, encryption key, agent config files (.claude/commands/xenv.md, .cursor/mcp.json, .vscode/mcp.json), and a git pre-commit hook that blocks secret leaks. After setup: xenv doctor (check health), xenv edit @env set KEY=VALUE (set secret), xenv audit --json (security scan). Security rules: NEVER commit .xenv.keys, NEVER include secret values in output, NEVER git add — always add specific files. Run xenv doctor now to verify.
 
 ## Docs
 
