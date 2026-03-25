@@ -18,7 +18,7 @@ export function wrap_html(body: string, css: string): string {
   <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:title" content="xenv — the first secrets manager built for AI agents">
-  <meta property="og:description" content="Built-in MCP server with 10 tools. AES-256-GCM encrypted vaults. --json on every command. Works with Claude Code, Cursor, Windsurf, Copilot. Single binary, zero deps.">
+  <meta property="og:description" content="Built-in MCP server with 11 tools. AES-256-GCM encrypted vaults. --json on every command. Works with Claude Code, Cursor, Windsurf, Copilot. Single binary, zero deps.">
   <meta property="og:url" content="https://xenv.sh/">
   <meta property="og:site_name" content="xenv">
   <meta property="og:image" content="https://xenv.sh/og.svg">

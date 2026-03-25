@@ -10,6 +10,7 @@ import { validate_env, format_validation } from "./validate";
 import { audit_project, format_audit } from "./audit";
 import { run_mcp_server } from "./mcp";
 import { run_init } from "./init";
+import { run_doctor, format_doctor } from "./doctor";
 import { print_output } from "./output";
 import pkg from "../package.json";
 
@@ -26,6 +27,13 @@ async function main(): Promise<void> {
   if (args.help) {
     printUsage();
     process.exit(0);
+  }
+
+  // doctor command
+  if (args.command === "doctor") {
+    const result = await run_doctor();
+    print_output(result, args.json, format_doctor);
+    process.exit(result.ok ? 0 : 1);
   }
 
   // init command
@@ -176,6 +184,7 @@ commands:
   xenv diff     @env [--keys-only]      compare plaintext vs encrypted vault
   xenv validate @env [--require K,...]  pre-flight check for missing/empty keys
   xenv rotate   @env                    rotate encryption key (re-encrypts vault)
+  xenv doctor   [--json]                check project health & agent integration
   xenv audit    [--json]                scan project for security mistakes
   xenv mcp                              start MCP server (JSON-RPC 2.0 stdio)
 

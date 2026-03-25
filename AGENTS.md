@@ -120,7 +120,8 @@ src/edit.ts         atomic vault editing (edit_set, edit_delete, edit_list)
 src/diff.ts         plaintext vs vault comparison
 src/validate.ts     pre-flight environment checks
 src/audit.ts        project security scanner
-src/mcp.ts          MCP server (JSON-RPC 2.0 over stdio, 10 tools)
+src/doctor.ts       project health & agent integration checker
+src/mcp.ts          MCP server (JSON-RPC 2.0 over stdio, 11 tools)
 src/run.ts          child process execution with signal forwarding
 src/output.ts       consistent human/JSON output formatting
 src/init.ts         project bootstrapping (xenv init)

@@ -12,6 +12,7 @@ import { audit_project } from "./audit";
 import { validate_env } from "./validate";
 import { diff_env } from "./diff";
 import { run_init } from "./init";
+import { run_doctor } from "./doctor";
 import pkg from "../package.json";
 
 const MCP_VERSION = "2024-11-05";
@@ -159,6 +160,14 @@ const TOOLS: McpTool[] = [
       required: ["env"],
     },
   },
+  {
+    name: "doctor",
+    description: "Check project health and agent integration status. Returns { ok, checks } where each check has name, ok, message, and optional fix command. Call this FIRST to understand the project state before using other tools.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 // ── Tool dispatch ────────────────────────────────────────────────────
@@ -215,6 +224,9 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
       ? args.required.map(String)
       : [];
     return await validate_env(env, required);
+  },
+  doctor: async () => {
+    return await run_doctor();
   },
 };
 

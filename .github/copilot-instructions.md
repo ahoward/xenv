@@ -12,7 +12,7 @@ See [AGENTS.md](../AGENTS.md) for full project guide: commands, code style, arch
 
 ## MCP server
 
-`xenv mcp` starts a JSON-RPC 2.0 MCP server over stdio with 10 tools for secrets management.
+`xenv mcp` starts a JSON-RPC 2.0 MCP server over stdio with 11 tools for secrets management. Call `doctor` first to check project health.
 
 ## Security
 
