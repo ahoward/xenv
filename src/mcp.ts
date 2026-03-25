@@ -13,6 +13,7 @@ import { validate_env } from "./validate";
 import { diff_env } from "./diff";
 import { run_init } from "./init";
 import { run_doctor } from "./doctor";
+import { hook_install, hook_check } from "./hook";
 import pkg from "../package.json";
 
 const MCP_VERSION = "2024-11-05";
@@ -168,6 +169,22 @@ const TOOLS: McpTool[] = [
       properties: {},
     },
   },
+  {
+    name: "hook_install",
+    description: "Install a git pre-commit hook that blocks commits containing leaked secrets. The hook decrypts all vaults in memory and scans staged changes for exact matches against known secret values. Opt-in only — not installed automatically.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "hook_check",
+    description: "Scan staged git changes for leaked secrets. Decrypts all vaults in memory and checks if any staged line contains a known secret value (exact match, not heuristic). Also detects common secret patterns (API keys, tokens). Returns { ok, leaks }.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 // ── Tool dispatch ────────────────────────────────────────────────────
@@ -227,6 +244,12 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   },
   doctor: async () => {
     return await run_doctor();
+  },
+  hook_install: async () => {
+    return hook_install();
+  },
+  hook_check: async () => {
+    return await hook_check();
   },
 };
 

@@ -8,7 +8,7 @@
 xenv @production -- ./server
 ```
 
-**the first secrets manager built for AI agents.** built-in [MCP server](#xenv-mcp--model-context-protocol-server) with 11 tools. `--json` on every command. atomic edits that never write plaintext to disk. audit guardrails that catch agent mistakes before they ship. works with Claude Code, Cursor, Windsurf, Copilot, Cline, Aider, Continue, Zed, and RooCode — out of the box.
+**the first secrets manager built for AI agents.** built-in [MCP server](#xenv-mcp--model-context-protocol-server) with 13 tools. `--json` on every command. atomic edits that never write plaintext to disk. audit guardrails that catch agent mistakes before they ship. works with Claude Code, Cursor, Windsurf, Copilot, Cline, Aider, Continue, Zed, and RooCode — out of the box.
 
 one argument names the environment. everything after `--` runs inside it. encrypted secrets are decrypted in memory, merged through a 7-layer cascade, and injected into the child process. decrypted secrets never touch disk at runtime.
 
@@ -62,7 +62,7 @@ xenv takes the best ideas from all of them and compiles to a static binary that 
 every tool in the table below was designed for humans typing in terminals. AI coding agents don't type — they call tools, parse JSON, and make mistakes at machine speed. when an agent runs `git add .`, your `.env.keys` file is gone. when it needs to rotate a key, it has to chain three shell commands and hope the intermediate plaintext file doesn't get committed between steps.
 
 xenv is the only secrets manager with:
-- **a built-in MCP server** — 11 tools that cover the full secrets lifecycle, callable from Claude Code, Cursor, Windsurf, Copilot, Cline, Aider, Continue, Zed, and RooCode
+- **a built-in MCP server** — 13 tools that cover the full secrets lifecycle, callable from Claude Code, Cursor, Windsurf, Copilot, Cline, Aider, Continue, Zed, and RooCode
 - **`--json` on every command** — agents parse structured output, not human-formatted tables
 - **zero-disk atomic edits** — `edit set` decrypts in memory, patches, re-encrypts. plaintext never exists as a file for an agent to accidentally stage
 - **`xenv audit`** — a security scanner the agent can run after every change to catch its own mistakes
@@ -520,7 +520,7 @@ agents should call `doctor` first. it returns structured health checks: gitignor
 
 ### `xenv mcp` — model context protocol server
 
-this gives any MCP-compatible AI tool (Claude Code, Cursor, Windsurf, Copilot, Cline, Aider, Continue, Zed, RooCode) native access to 11 tools:
+this gives any MCP-compatible AI tool (Claude Code, Cursor, Windsurf, Copilot, Cline, Aider, Continue, Zed, RooCode) native access to 13 tools:
 
 | tool | what it does |
 |------|-------------|
@@ -535,10 +535,31 @@ this gives any MCP-compatible AI tool (Claude Code, Cursor, Windsurf, Copilot, C
 | `audit` | scan project for security mistakes |
 | `validate` | check environment for missing keys, empty secrets, vault issues |
 | `doctor` | check project health & agent integration status — call this first |
+| `hook_install` | install git pre-commit hook that blocks secret leaks (opt-in) |
+| `hook_check` | scan staged changes for leaked secrets — exact match against vault contents |
 
-the server speaks JSON-RPC 2.0 over stdio. zero dependencies. no SDK required. 11 tools cover the complete secrets lifecycle — from bootstrapping to key rotation.
+the server speaks JSON-RPC 2.0 over stdio. zero dependencies. no SDK required. 13 tools cover the complete secrets lifecycle — from bootstrapping to key rotation.
 
 when an AI agent needs to rotate a production key, it calls one tool — not three shell commands. when it needs to add a secret, the plaintext never exists as a file for it to accidentally `git add`.
+
+### `xenv hook` — pre-commit secret leak prevention
+
+```bash
+# opt-in: install the pre-commit hook
+xenv hook install
+
+# what it does: decrypts all vaults in memory, scans staged diff
+# for exact matches against known secret values. blocks the commit
+# if any secret is found. not heuristics — exact match.
+git commit -m "oops"
+# → xenv: secrets detected in staged changes — commit blocked
+#   config.js:12 — contains a secret value from an encrypted vault
+
+# remove it
+xenv hook uninstall
+```
+
+this is the only pre-commit hook that knows your actual secrets. it decrypts every vault in memory and checks if any staged line contains a known value. pattern detection (API key prefixes, hex strings) catches the rest.
 
 ### `xenv resolve` — dump the cascade
 

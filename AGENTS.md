@@ -121,7 +121,8 @@ src/diff.ts         plaintext vs vault comparison
 src/validate.ts     pre-flight environment checks
 src/audit.ts        project security scanner
 src/doctor.ts       project health & agent integration checker
-src/mcp.ts          MCP server (JSON-RPC 2.0 over stdio, 11 tools)
+src/hook.ts         git pre-commit hook (blocks secret leaks)
+src/mcp.ts          MCP server (JSON-RPC 2.0 over stdio, 13 tools)
 src/run.ts          child process execution with signal forwarding
 src/output.ts       consistent human/JSON output formatting
 src/init.ts         project bootstrapping (xenv init)

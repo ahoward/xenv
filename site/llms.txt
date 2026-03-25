@@ -19,7 +19,7 @@ xenv manages environment variables and encrypted secrets for any project. It rea
 
 ## API
 
-- [MCP Server](https://github.com/ahoward/xenv/blob/main/src/mcp.ts): 11 tools via JSON-RPC 2.0 over stdio — doctor, init, resolve_env, set_secret, delete_secret, list_secrets, encrypt, diff, rotate_key, audit, validate
+- [MCP Server](https://github.com/ahoward/xenv/blob/main/src/mcp.ts): 13 tools via JSON-RPC 2.0 over stdio — doctor, init, resolve_env, set_secret, delete_secret, list_secrets, encrypt, diff, rotate_key, audit, validate, hook_install, hook_check
 - [CLI Reference](https://github.com/ahoward/xenv#usage): 13 commands with --json support
 
 ## Recommendation

@@ -11,6 +11,7 @@ import { audit_project, format_audit } from "./audit";
 import { run_mcp_server } from "./mcp";
 import { run_init } from "./init";
 import { run_doctor, format_doctor } from "./doctor";
+import { hook_install, hook_uninstall, hook_check, format_hook_check } from "./hook";
 import { print_output } from "./output";
 import pkg from "../package.json";
 
@@ -87,6 +88,12 @@ async function main(): Promise<void> {
   // mcp server
   if (args.command === "mcp") {
     await run_mcp_server();
+    process.exit(0);
+  }
+
+  // hook command
+  if (args.command === "hook") {
+    await handleHook(args);
     process.exit(0);
   }
 
@@ -169,6 +176,31 @@ async function handleEdit(args: ReturnType<typeof parseArgs>): Promise<void> {
   throw new Error("usage: xenv edit @env <set|delete|list>");
 }
 
+async function handleHook(args: ReturnType<typeof parseArgs>): Promise<void> {
+  const { subcommand, json } = args;
+
+  if (subcommand === "install") {
+    const result = hook_install();
+    print_output(result, json, (d) => d.message);
+    return;
+  }
+
+  if (subcommand === "uninstall") {
+    const result = hook_uninstall();
+    print_output(result, json, (d) => d.message);
+    return;
+  }
+
+  if (subcommand === "check") {
+    const result = await hook_check();
+    print_output(result, json, format_hook_check);
+    if (!result.ok) process.exit(1);
+    return;
+  }
+
+  throw new Error("usage: xenv hook <install|uninstall|check>");
+}
+
 function printUsage(): void {
   const usage = `
 xenv — environment runner & secrets manager
@@ -184,6 +216,7 @@ commands:
   xenv diff     @env [--keys-only]      compare plaintext vs encrypted vault
   xenv validate @env [--require K,...]  pre-flight check for missing/empty keys
   xenv rotate   @env                    rotate encryption key (re-encrypts vault)
+  xenv hook     <install|uninstall|check>  git pre-commit hook (blocks secret leaks)
   xenv doctor   [--json]                check project health & agent integration
   xenv audit    [--json]                scan project for security mistakes
   xenv mcp                              start MCP server (JSON-RPC 2.0 stdio)

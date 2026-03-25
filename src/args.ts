@@ -11,11 +11,11 @@ export interface ParsedArgs {
 }
 
 const COMMANDS = new Set([
-  "encrypt", "decrypt", "keygen", "init", "doctor",
+  "encrypt", "decrypt", "keygen", "init", "doctor", "hook",
   "edit", "diff", "validate", "audit", "resolve", "rotate", "mcp",
 ]);
 
-const SUBCOMMANDS = new Set(["set", "delete", "list"]);
+const SUBCOMMANDS = new Set(["set", "delete", "list", "install", "uninstall", "check"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
   let env = "development";
@@ -81,8 +81,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       command = arg;
       i++;
 
-      // for commands with subcommands (edit), consume subcommand + positional args
-      if (command === "edit") {
+      // for commands with subcommands (edit, hook), consume subcommand + positional args
+      if (command === "edit" || command === "hook") {
         while (i < argv.length) {
           const next = argv[i];
           if (next === "--") break;
