@@ -21,7 +21,7 @@ export function wrap_html(body: string, css: string): string {
   <meta property="og:description" content="Built-in MCP server with 13 tools. AES-256-GCM encrypted vaults. --json on every command. Works with Claude Code, Cursor, Windsurf, Copilot. Single binary, zero deps.">
   <meta property="og:url" content="https://xenv.sh/">
   <meta property="og:site_name" content="xenv">
-  <meta property="og:image" content="https://xenv.sh/og.svg">
+  <meta property="og:image" content="https://xenv.sh/og.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
 
@@ -29,7 +29,7 @@ export function wrap_html(body: string, css: string): string {
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="xenv — the first secrets manager built for AI agents">
   <meta name="twitter:description" content="Built-in MCP server. AES-256-GCM encrypted vaults. --json everywhere. Works with Claude Code, Cursor, Windsurf, Copilot. Zero deps.">
-  <meta name="twitter:image" content="https://xenv.sh/og.svg">
+  <meta name="twitter:image" content="https://xenv.sh/og.png">
 
   <!-- Favicon -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔐</text></svg>">

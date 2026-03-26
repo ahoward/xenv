@@ -33,7 +33,7 @@ async function main() {
   console.log("  site/dist/index.html");
 
   // copy static files
-  const statics = ["llms.txt", "robots.txt", "sitemap.xml", "og.svg"];
+  const statics = ["llms.txt", "robots.txt", "sitemap.xml", "og.svg", "og.png"];
   for (const file of statics) {
     const src = join(SITE_DIR, file);
     if (existsSync(src)) {
