@@ -35,7 +35,12 @@ BINARY="xenv-${PLATFORM}-${ARCH_NAME}"
 if [ -n "$XENV_VERSION" ]; then
   TAG="$XENV_VERSION"
 else
-  TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | head -1 | cut -d '"' -f 4)"
+  RELEASE_JSON="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")"
+  if command -v jq >/dev/null 2>&1; then
+    TAG="$(echo "$RELEASE_JSON" | jq -r .tag_name)"
+  else
+    TAG="$(echo "$RELEASE_JSON" | grep '"tag_name"' | head -1 | cut -d '"' -f 4)"
+  fi
   if [ -z "$TAG" ]; then
     echo "error: could not determine latest release — set XENV_VERSION manually" >&2
     exit 1

@@ -180,7 +180,7 @@ xenv edit @production list                      # key names only
 
 ```bash
 xenv resolve  @production --json                # dump merged cascade
-xenv diff     @production --keys-only           # what changed?
+xenv diff     @production                       # what changed? (keys-only by default)
 xenv validate @production --require DB_URL      # pre-flight check
 xenv audit                                      # security scan
 ```
@@ -617,17 +617,17 @@ returns the final merged environment after all 7 cascade layers. useful for debu
 ### `xenv diff` — compare plaintext vs vault
 
 ```bash
-# full diff
+# keys-only by default (safe for logs and CI output)
 xenv diff @production
 
-# key names only (safe for logs and CI output)
-xenv diff @production --keys-only
+# show actual values (careful — prints secrets)
+xenv diff @production --values
 
 # structured JSON
 xenv diff @production --json
 ```
 
-compares the plaintext `.xenv.{env}` file against the decrypted `.xenv.{env}.enc` vault. shows added, removed, and changed keys. the `--keys-only` flag strips values so it's safe to print in CI logs.
+compares the plaintext `.xenv.{env}` file against the decrypted `.xenv.{env}.enc` vault. shows added, removed, and changed keys. values are hidden by default — use `--values` to show secret content.
 
 ### `xenv validate` — pre-flight checks
 
@@ -721,15 +721,3 @@ xenv takes the runner model from senv, the vault philosophy from sekrets, the am
 
 MIT — [mountainhigh.codes](https://mountainhigh.codes) / [drawohara.io](https://drawohara.io)
 
----
-
-## get started
-
-```bash
-curl -fsSL https://xenv.sh/install.sh | sh
-xenv init @production
-xenv encrypt @production
-xenv @production -- ./server
-```
-
-four commands. no accounts. no servers. no runtime. just encrypted secrets, decrypted in memory, injected into your process.

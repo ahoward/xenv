@@ -52,33 +52,33 @@ export async function run_init(env: string = "development", cwd: string = proces
   ensure_agent_configs(cwd, created, skipped);
 
   // 5. print summary
-  console.log(`\nxenv initialized for @${env}\n`);
+  console.error(`\nxenv initialized for @${env}\n`);
 
   if (created.length > 0) {
-    console.log("created:");
-    for (const line of created) console.log(`  ${line}`);
-    console.log();
+    console.error("created:");
+    for (const line of created) console.error(`  ${line}`);
+    console.error();
   }
 
   if (updated.length > 0) {
-    console.log("updated:");
-    for (const line of updated) console.log(`  ${line}`);
-    console.log();
+    console.error("updated:");
+    for (const line of updated) console.error(`  ${line}`);
+    console.error();
   }
 
   if (skipped.length > 0) {
-    console.log("unchanged:");
-    for (const line of skipped) console.log(`  ${line}`);
-    console.log();
+    console.error("unchanged:");
+    for (const line of skipped) console.error(`  ${line}`);
+    console.error();
   }
 
-  console.log("next steps:");
-  console.log(`  1. add your env vars to .xenv.${env}`);
-  console.log(`  2. xenv encrypt @${env}`);
-  console.log(`  3. xenv @${env} -- your-command`);
-  console.log(`  4. git add .xenv.${env}.enc .gitignore`);
-  console.log();
-  console.log("docs: https://github.com/ahoward/xenv");
+  console.error("next steps:");
+  console.error(`  1. add your env vars to .xenv.${env}`);
+  console.error(`  2. xenv encrypt @${env}`);
+  console.error(`  3. xenv @${env} -- your-command`);
+  console.error(`  4. git add .xenv.${env}.enc .gitignore`);
+  console.error();
+  console.error("docs: https://github.com/ahoward/xenv");
 }
 
 /**
@@ -139,7 +139,7 @@ Start by running \`xenv doctor\` to check project health, then use the appropria
 - \`xenv edit @<env> delete KEY\` — remove a secret
 - \`xenv edit @<env> list\` — list secret key names (not values)
 - \`xenv resolve @<env> --json\` — dump the merged 7-layer cascade
-- \`xenv diff @<env> --keys-only\` — compare plaintext vs encrypted vault
+- \`xenv diff @<env>\` — compare plaintext vs encrypted vault (keys only by default, \`--values\` to show secrets)
 - \`xenv validate @<env>\` — pre-flight check for missing/empty keys
 - \`xenv rotate @<env>\` — rotate encryption key
 - \`xenv audit --json\` — scan project for security mistakes

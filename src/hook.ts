@@ -243,8 +243,8 @@ function parse_diff(diff: string): DiffEntry[] {
       current_line++;
       continue;
     }
-    // context line (not removed)
-    if (!line.startsWith("-")) {
+    // context line (not removed, not a "no newline" marker)
+    if (!line.startsWith("-") && !line.startsWith("\\ ")) {
       current_line++;
     }
   }

@@ -17,7 +17,7 @@ export interface AuditResult {
 
 // patterns that suggest a value is a secret
 const SECRET_VALUE_PATTERN = /^(sk_|pk_|ghp_|gho_|ghs_|ghr_|glpat-|xox[bpsa]-|AKIA|eyJ|ssh-|-----BEGIN)/;
-const HEX_SECRET_PATTERN = /^[a-f0-9]{32,}$/i;
+const HEX_SECRET_PATTERN = /^[a-f0-9]{40,}$/i;
 
 /**
  * Scan the project for common security mistakes.
@@ -139,7 +139,7 @@ export async function audit_project(cwd: string = process.cwd()): Promise<AuditR
 
 function looks_like_secret(value: string): boolean {
   if (SECRET_VALUE_PATTERN.test(value)) return true;
-  if (HEX_SECRET_PATTERN.test(value) && value.length >= 32) return true;
+  if (HEX_SECRET_PATTERN.test(value) && value.length >= 40) return true;
   return false;
 }
 

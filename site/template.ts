@@ -45,7 +45,7 @@ export function wrap_html(body: string, css: string, version: string = "1.0.0"):
     "description": "AI-native environment runner and secrets manager. Single binary, zero dependencies, AES-256-GCM encrypted vaults, MCP server for AI coding agents.",
     "url": "https://xenv.sh/",
     "downloadUrl": "https://xenv.sh/install.sh",
-    "softwareVersion": "${version}",
+    "softwareVersion": ${JSON.stringify(version)},
     "license": "https://opensource.org/licenses/MIT",
     "offers": {
       "@type": "Offer",

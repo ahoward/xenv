@@ -80,7 +80,7 @@ state lives in `bny/`. do not modify state files directly.
 | `xenv edit @env delete K` | remove a secret from vault | `xenv edit @production delete OLD_KEY` |
 | `xenv edit @env list` | list vault key names (no values) | `xenv edit @production list --json` |
 | `xenv resolve @env` | dump merged cascade | `xenv resolve @production --json` |
-| `xenv diff @env` | compare plaintext vs vault | `xenv diff @production --keys-only` |
+| `xenv diff @env` | compare plaintext vs vault (keys only by default, `--values` to show secrets) | `xenv diff @production` |
 | `xenv validate @env` | pre-flight checks | `xenv validate @production --require DB_URL` |
 | `xenv audit` | security scan | `xenv audit --json` |
 | `xenv mcp` | start MCP server (stdio) | `xenv mcp` |
@@ -164,7 +164,8 @@ bun test              # run all tests
 .xenv.production.enc        prod vault (committed, encrypted)
 .xenv.staging               staging plaintext (gitignored)
 .xenv.staging.enc           staging vault (committed, encrypted)
-.xenv.development           dev config (committed, no secrets)
+.xenv.development           dev plaintext (gitignored)
+.xenv.development.enc       dev vault (committed, encrypted)
 .xenv.local                 your machine only (gitignored)
 .gitignore
 ```

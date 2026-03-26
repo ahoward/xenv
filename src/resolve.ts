@@ -55,18 +55,22 @@ export async function resolveEnv(
   if (existsSync(encPath)) {
     const key = resolveKey(env, cwd);
     if (key) {
-      const decrypted = await decryptVault(encPath, key);
-      const parsed = parseEnvContent(decrypted);
-      Object.assign(merged, parsed);
+      try {
+        const decrypted = await decryptVault(encPath, key);
+        const parsed = parseEnvContent(decrypted);
+        Object.assign(merged, parsed);
+      } catch {
+        throw new Error(`vault decryption failed for @${env} — check that ${keyEnvNames(env)} is correct`);
+      }
     } else {
       console.error(`xenv: warning: vault .xenv.${env}.enc exists but ${keyEnvNames(env)} is not set — run 'xenv keygen @${env}' to generate a key, or set the env var in your shell`);
     }
   }
 
   // 7. system ENV wins last (but filter out encryption keys)
-  for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith("XENV_KEY")) continue;
-    if (value !== undefined) merged[key] = value;
+  for (const [k, value] of Object.entries(process.env)) {
+    if (k.startsWith("XENV_KEY")) continue;
+    if (value !== undefined) merged[k] = value;
   }
 
   return merged;
@@ -110,9 +114,13 @@ export async function resolveCascadeOnly(
   if (existsSync(encPath)) {
     const key = resolveKey(env, cwd);
     if (key) {
-      const decrypted = await decryptVault(encPath, key);
-      const parsed = parseEnvContent(decrypted);
-      Object.assign(merged, parsed);
+      try {
+        const decrypted = await decryptVault(encPath, key);
+        const parsed = parseEnvContent(decrypted);
+        Object.assign(merged, parsed);
+      } catch {
+        throw new Error(`vault decryption failed for @${env} — check that ${keyEnvNames(env)} is correct`);
+      }
     }
   }
 

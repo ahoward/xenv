@@ -364,5 +364,5 @@ export async function rotate_vault_key(env: string, cwd: string = process.cwd())
   await Bun.write(keys_path, content);
   chmodSync(keys_path, 0o600);
 
-  return { env, new_key };
+  return { env };
 }
