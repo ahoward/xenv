@@ -124,7 +124,7 @@ no other env tool has any of these.
 | **cascade layers** | 7 | 2-4 (convention flag) | merge order | 1 | 4 (Ruby) / 1 (Node) | 3 |
 | **zero-disk secrets** | yes | yes | yes | n/a | n/a | yes |
 | **key management** | `XENV_KEY_{ENV}` or `XENV_KEY` | `.env.keys` + `DOTENV_PRIVATE_KEY_{ENV}` | `.senv/.key` | n/a | n/a | 1Password account |
-| **platforms** | linux, mac, windows | linux, mac, windows | anywhere Ruby runs | linux, mac | anywhere | linux, mac, windows |
+| **platforms** | linux, mac, windows (WSL) | linux, mac, windows | anywhere Ruby runs | linux, mac | anywhere | linux, mac, windows |
 | **signal forwarding** | yes | partial ([#730](https://github.com/dotenvx/dotenvx/issues/730)) | yes | n/a | n/a | yes |
 | **AI agent support** | MCP server + `--json` | none | none | none | none | none |
 | **atomic secret edit** | `edit set` (zero-disk) | `dotenvx set` (writes `.env`) | none | none | none | none |

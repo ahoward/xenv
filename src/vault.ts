@@ -211,8 +211,8 @@ export async function runEncrypt(env: string): Promise<void> {
 
   let key = resolveKey(env);
   if (!key) {
-    // auto-generate a key if none exists
-    await runKeygen(env);
+    // auto-generate a key if none exists (quiet — don't leak key to stderr)
+    await runKeygen(env, true);
     key = resolveKey(env);
   }
 

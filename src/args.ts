@@ -68,8 +68,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     // @env syntax
     if (arg.startsWith("@")) {
       const name = arg.slice(1);
-      if (name.includes("/") || name.includes("\\") || name.includes("..") || name.includes("\0")) {
-        throw new Error(`invalid environment name: ${name} — use alphanumeric names like 'production', 'staging', 'test'`);
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+        throw new Error(`invalid environment name: ${name} — must be alphanumeric (a-z, 0-9, _, -). examples: 'production', 'staging', 'test'`);
       }
       env = name;
       i++;

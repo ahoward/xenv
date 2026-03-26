@@ -77,9 +77,10 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // diff command
+  // diff command (keys-only by default for safety; --values to show secret content)
   if (args.command === "diff") {
-    const keys_only = !!args.flags["keys-only"];
+    const show_values = !!args.flags["values"];
+    const keys_only = !show_values;
     const result = await diff_env(args.env, keys_only);
     print_output(result, args.json, format_diff);
     process.exit(0);
@@ -213,7 +214,7 @@ commands:
   xenv keygen   @env                    generate a 256-bit encryption key
   xenv edit     @env <set|delete|list>  edit secrets without decrypting to disk
   xenv resolve  @env [--json]           dump the merged 7-layer cascade
-  xenv diff     @env [--keys-only]      compare plaintext vs encrypted vault
+  xenv diff     @env [--values]         compare plaintext vs vault (keys-only by default)
   xenv validate @env [--require K,...]  pre-flight check for missing/empty keys
   xenv rotate   @env                    rotate encryption key (re-encrypts vault)
   xenv hook     <install|uninstall|check>  git pre-commit hook (blocks secret leaks)

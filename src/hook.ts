@@ -123,7 +123,7 @@ export async function hook_check(cwd: string = process.cwd()): Promise<HookCheck
     if (file === ".xenv.keys") {
       leaks.push({ file, line: 0, reason: ".xenv.keys contains encryption keys — must never be committed" });
     }
-    if (/^\.xenv\.[^.]+$/.test(file) && !file.endsWith(".enc")) {
+    if ((file.startsWith(".xenv.") || file.startsWith(".env.")) && !file.endsWith(".enc")) {
       leaks.push({ file, line: 0, reason: `${file} is a plaintext env file — commit the .enc vault instead` });
     }
   }

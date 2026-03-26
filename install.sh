@@ -42,6 +42,12 @@ else
   fi
 fi
 
+# validate tag format
+case "$TAG" in
+  v[0-9]*) ;;
+  *) echo "error: unexpected version tag format: ${TAG}" >&2; exit 1 ;;
+esac
+
 URL="https://github.com/${REPO}/releases/download/${TAG}/${BINARY}"
 
 echo "installing xenv ${TAG} (${PLATFORM}/${ARCH_NAME})"

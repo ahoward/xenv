@@ -86,9 +86,8 @@ describe("parseArgs", () => {
     expect(r.json).toBe(true);
   });
 
-  test("bare @ produces empty env name", () => {
-    const r = parseArgs(["@", "--", "cmd"]);
-    expect(r.env).toBe("");
+  test("bare @ throws for empty env name", () => {
+    expect(() => parseArgs(["@", "--", "cmd"])).toThrow("invalid environment name");
   });
 
   test("-- with no command after it", () => {

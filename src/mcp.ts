@@ -284,9 +284,9 @@ async function handle_tools_call(params: Record<string, unknown>): Promise<unkno
   // validate env name if present (prevent path traversal)
   if (args.env !== undefined && args.env !== null) {
     const env_str = String(args.env);
-    if (env_str.includes("/") || env_str.includes("\\") || env_str.includes("..") || env_str.includes("\0")) {
+    if (!/^[a-zA-Z0-9_-]+$/.test(env_str)) {
       return {
-        content: [{ type: "text", text: `invalid environment name: ${env_str} — use alphanumeric names like 'production', 'staging', 'test'` }],
+        content: [{ type: "text", text: `invalid environment name: ${env_str} — must be alphanumeric (a-z, 0-9, _, -). examples: 'production', 'staging', 'test'` }],
         isError: true,
       };
     }
@@ -416,11 +416,18 @@ function log(message: string): void {
 export async function run_mcp_server(): Promise<void> {
   log("starting xenv MCP server");
 
+  const MAX_LINE_LENGTH = 10 * 1024 * 1024; // 10 MB
   const decoder = new TextDecoder();
   let buffer = "";
 
   for await (const chunk of Bun.stdin.stream()) {
     buffer += decoder.decode(chunk, { stream: true });
+
+    if (buffer.length > MAX_LINE_LENGTH && !buffer.includes("\n")) {
+      log("line exceeds 10MB limit, dropping");
+      buffer = "";
+      continue;
+    }
 
     let newline_idx: number;
     while ((newline_idx = buffer.indexOf("\n")) !== -1) {
