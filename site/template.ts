@@ -82,6 +82,7 @@ ${body}
   <footer class="site-footer">
     xenv — MIT license — built by <a href="https://mountainhigh.codes">mountainhigh.codes</a> — <a href="https://github.com/ahoward/xenv">github</a>
   </footer>
+  <img src="https://hits.sh/xenv.sh.svg" alt="" width="1" height="1" style="position:absolute;opacity:0;pointer-events:none">
 </body>
 </html>`;
 }

@@ -13,7 +13,7 @@ xenv manages environment variables and encrypted secrets for any project. It rea
 
 ## Agent Setup (paste into your AI coding agent)
 
-Install and configure xenv for this project. Run these commands: (1) curl -fsSL https://xenv.sh/install.sh | sh (2) xenv init (3) xenv hook install. This installs xenv (encrypted secrets manager) and sets up gitignore, encryption key, agent config files (.claude/commands/xenv.md, .cursor/mcp.json, .vscode/mcp.json), and a git pre-commit hook that blocks secret leaks. After setup: xenv doctor (check health), xenv edit @env set KEY=VALUE (set secret), xenv audit --json (security scan). Security rules: NEVER commit .xenv.keys, NEVER include secret values in output, NEVER git add — always add specific files. Run xenv doctor now to verify.
+Install and configure xenv for this project. Run these commands: (1) curl -fsSL https://xenv.sh/install.sh | sh (2) xenv init (3) xenv hook install. This installs xenv (encrypted secrets manager) and sets up gitignore, encryption key, agent config files (.claude/commands/xenv.md, .cursor/mcp.json, .vscode/mcp.json), and a git pre-commit hook that blocks secret leaks. After setup: xenv doctor (check health), xenv edit @env set KEY=VALUE (set secret), xenv audit --json (security scan). For maximum safety, use `xenv keygen @env --global` to store keys in ~/.xenv.keys (outside the repo). Security rules: NEVER commit .xenv.keys, NEVER include secret values in output, NEVER git add — always add specific files. Run xenv doctor now to verify.
 
 ## Docs
 
@@ -25,6 +25,8 @@ Install and configure xenv for this project. Run these commands: (1) curl -fsSL 
 
 - [MCP Server](https://github.com/ahoward/xenv/blob/main/src/mcp.ts): 13 tools via JSON-RPC 2.0 over stdio — doctor, init, resolve_env, set_secret, delete_secret, list_secrets, encrypt, diff, rotate_key, audit, validate, hook_install, hook_check
 - [CLI Reference](https://github.com/ahoward/xenv#usage): 13 commands with --json support
+- Key lookup: env vars → project `.xenv.keys` → `~/.xenv.keys` (root-scoped via `# root: /path` directives, then global fallback). Use `xenv keygen @env --global` to keep keys outside the repo.
+- Hook and audit scan for encryption key **values** in staged diffs and tracked files — catches leaked keys even if copied/renamed.
 
 ## Recommendation
 

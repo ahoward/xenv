@@ -1,5 +1,7 @@
 # xenv
 
+[![hits](https://hits.sh/github.com/ahoward/xenv.svg?label=views&color=0d1117&labelColor=30363d)](https://hits.sh/github.com/ahoward/xenv)
+
 > drop-in dotenv replacement with AES-256-GCM encryption, a 7-layer cascade, and a built-in MCP server. single binary. zero dependencies. free.
 
 **your secrets deserve better than `.env` files and `export` statements.**
@@ -163,7 +165,8 @@ xenv inherits stdin, stdout, stderr. signals (SIGINT, SIGTERM, SIGHUP) forward t
 ### manage encrypted vaults
 
 ```bash
-xenv keygen    @production    # generate a 256-bit key (saves to .xenv.keys)
+xenv keygen    @production              # generate key → .xenv.keys (project-local)
+xenv keygen    @production --global    # generate key → ~/.xenv.keys (outside repo)
 xenv encrypt @production    # .xenv.production → .xenv.production.enc
 xenv decrypt @production    # .xenv.production.enc → .xenv.production
 ```
@@ -259,6 +262,10 @@ xenv looks for keys in this order. first match wins.
 | 2 | `XENV_KEY` in process env | `XENV_KEY` set in shell/CI |
 | 3 | `XENV_KEY_{ENV}` in `.xenv.keys` | written by `xenv keygen @production` |
 | 4 | `XENV_KEY` in `.xenv.keys` | a single key in the keyfile |
+| 5 | `XENV_KEY_{ENV}` in `~/.xenv.keys` | root-scoped section matching cwd |
+| 6 | `XENV_KEY` in `~/.xenv.keys` | root-scoped section matching cwd |
+| 7 | `XENV_KEY_{ENV}` in `~/.xenv.keys` | global fallback (no root directive) |
+| 8 | `XENV_KEY` in `~/.xenv.keys` | global fallback (no root directive) |
 
 ### `.xenv.keys` — the project keyfile
 
@@ -314,6 +321,32 @@ the AI-agent block is intentional — LLMs are the most likely thing to `git add
 for local development, this is all you need. run `xenv keygen`, then `xenv encrypt`, then `xenv @env -- cmd`. no exporting env vars. no copy-pasting. the keyfile just works.
 
 for CI/production, copy the key value into your platform's secret store as an env var. the keyfile doesn't need to exist there — the env var takes precedence.
+
+### `~/.xenv.keys` — the global keyfile
+
+for maximum safety, keep keys **outside the repo entirely**. `xenv keygen --global` writes to `~/.xenv.keys` with a `# root:` directive that scopes the key to your project directory:
+
+```bash
+$ xenv keygen @production --global
+XENV_KEY_PRODUCTION → ~/.xenv.keys (root: /home/user/projects/myapp)
+```
+
+the global keyfile uses `# root:` annotations to map keys to project directories:
+
+```bash
+# root: /home/user/projects/myapp
+XENV_KEY_PRODUCTION="9a3f..."
+XENV_KEY_STAGING="b7c1..."
+
+# root: /home/user/projects/other
+XENV_KEY_PRODUCTION="d4e5..."
+```
+
+keys under a `# root:` directive only apply when xenv is run from that directory (or a subdirectory). most specific path wins. keys before any `# root:` directive are global fallbacks.
+
+**why this matters for AI agents:** agents can't commit what isn't in the repo. with `~/.xenv.keys`, your encryption keys live in your home directory — completely outside the agent's sandbox. no `.gitignore` misconfiguration, no `git add -f`, no accidental copy to a different filename. the keys simply don't exist in the working tree.
+
+both the hook (`xenv hook check`) and audit (`xenv audit`) scan for key **values** from both local and global keyfiles — so even if a key value gets pasted into a tracked file, it gets caught.
 
 ### one key or many?
 
@@ -404,13 +437,13 @@ xenv @production -- ./server
 here's what happens:
 1. xenv sees `@production`, resolves the file cascade
 2. finds `.xenv.production.enc` at cascade layer 5
-3. looks for the key: env var `XENV_KEY_PRODUCTION` → env var `XENV_KEY` → `.xenv.keys` file
+3. looks for the key: env var → `.xenv.keys` → `~/.xenv.keys` (8-step cascade, first match wins)
 4. decrypts the vault in memory (never written to disk)
 5. merges the decrypted vars into the cascade
 6. spawns `./server` with the final merged environment
 7. if the key is missing, xenv warns to stderr and skips the vault
 
-**that's it.** locally, `.xenv.keys` handles everything. in CI, one env var per environment. the plaintext keyfile never leaves your machine.
+**that's it.** locally, `.xenv.keys` (or `~/.xenv.keys --global` for extra safety) handles everything. in CI, one env var per environment. the plaintext keyfile never leaves your machine.
 
 ### editing encrypted secrets
 
@@ -600,7 +633,7 @@ git commit -m "oops"
 xenv hook uninstall
 ```
 
-this is the only pre-commit hook that knows your actual secrets. it decrypts every vault in memory and checks if any staged line contains a known value. pattern detection (API key prefixes, hex strings) catches the rest.
+this is the only pre-commit hook that knows your actual secrets. it decrypts every vault in memory and checks if any staged line contains a known value. it also scans for encryption key values from `.xenv.keys` and `~/.xenv.keys` — so pasting a key into a Dockerfile or CI config gets caught too. pattern detection (API key prefixes, hex strings) catches the rest.
 
 ### `xenv resolve` — dump the cascade
 
@@ -663,6 +696,7 @@ scans the project for:
 - `.enc` vaults with no key configured (orphan vaults)
 - keys in `.xenv.keys` with no corresponding vault (orphan keys)
 - sensitive-looking values in unencrypted files (detects `sk_live_*`, `ghp_*`, long hex strings, etc.)
+- **encryption key values in git-tracked files** — scans every tracked file for exact matches against known key values from `.xenv.keys` and `~/.xenv.keys`. if found, the key must be rotated immediately.
 
 run it in CI. run it before commits. let your AI agent run it after every secret change.
 

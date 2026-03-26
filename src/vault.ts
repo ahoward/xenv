@@ -1,5 +1,7 @@
 import { existsSync, chmodSync, readFileSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
+import { realpathSync } from "fs";
 import { parseEnvContent } from "./parse";
 
 const VAULT_VERSION = 1;
@@ -40,12 +42,19 @@ const KEYS_FILE_HEADER = `\
 # Key lookup order (first match wins):
 #   1. XENV_KEY_{ENV} environment variable
 #   2. XENV_KEY environment variable (global fallback)
-#   3. XENV_KEY_{ENV} in this file
+#   3. XENV_KEY_{ENV} in this file (.xenv.keys)
 #   4. XENV_KEY in this file (global fallback)
+#   5. XENV_KEY_{ENV} in ~/.xenv.keys (root-scoped section)
+#   6. XENV_KEY in ~/.xenv.keys (root-scoped section)
+#   7. XENV_KEY_{ENV} in ~/.xenv.keys (global fallback)
+#   8. XENV_KEY in ~/.xenv.keys (global fallback)
 #
-# Environment variables always take precedence over this file.
+# Environment variables always take precedence.
 # In CI/production, set the key as an env var in your platform's
 # secret store — this file should only exist on dev machines.
+# For extra safety, use ~/.xenv.keys with "# root:" directives
+# to keep keys outside the repo entirely:
+#   xenv keygen @env --global
 #
 # ------------------------------------------------------------
 # COMMANDS
@@ -60,6 +69,47 @@ const KEYS_FILE_HEADER = `\
 
 `;
 
+const GLOBAL_KEYS_FILE_HEADER = `\
+# ============================================================
+# ~/.xenv.keys — GLOBAL ENCRYPTION KEYS FOR XENV VAULTS
+# ============================================================
+#
+# WARNING: THIS FILE CONTAINS SECRET KEYS.
+#
+# This file lives outside any repository, so it cannot be
+# accidentally committed by git or AI agents.
+#
+# ------------------------------------------------------------
+# HOW THIS FILE WORKS
+# ------------------------------------------------------------
+#
+# Use "# root: /absolute/path" directives to scope keys to a
+# specific project directory. Keys below a root directive apply
+# only when xenv is run from that directory (or a subdirectory).
+#
+# Keys before any root directive are global fallbacks — they
+# apply to any project that doesn't have a more specific match.
+#
+# Example:
+#
+#   # root: /home/user/projects/myapp
+#   XENV_KEY_PRODUCTION="abc123..."
+#   XENV_KEY_STAGING="def456..."
+#
+#   # root: /home/user/projects/other
+#   XENV_KEY_PRODUCTION="ghi789..."
+#
+#   # global fallback (no root directive above)
+#   XENV_KEY="fallback..."
+#
+# Generate with:
+#   xenv keygen @env --global
+#
+# ============================================================
+
+`;
+
+// ── keys file reading ──────────────────────────────────────────────
 
 /**
  * Read keys from the project-local .xenv.keys file.
@@ -71,26 +121,124 @@ function readKeysFile(cwd: string = process.cwd()): Record<string, string> {
   return parseEnvContent(readFileSync(path, "utf-8"));
 }
 
+interface GlobalKeysSection {
+  root: string | null; // null = global fallback
+  keys: Record<string, string>;
+}
+
+/**
+ * Parse the content of a global keys file with # root: directives.
+ */
+export function parseGlobalKeysContent(content: string): GlobalKeysSection[] {
+  const sections: GlobalKeysSection[] = [];
+  let current_root: string | null = null;
+  let current_lines: string[] = [];
+
+  function flush() {
+    const text = current_lines.join("\n");
+    const keys = parseEnvContent(text);
+    if (Object.keys(keys).length > 0) {
+      sections.push({ root: current_root, keys });
+    }
+    current_lines = [];
+  }
+
+  for (const line of content.split("\n")) {
+    const root_match = line.match(/^#\s*root:\s*(.+)$/);
+    if (root_match) {
+      flush();
+      current_root = root_match[1].trim().replace(/\/+$/, ""); // normalize trailing slash
+      continue;
+    }
+    current_lines.push(line);
+  }
+  flush();
+
+  return sections;
+}
+
+/**
+ * Read and parse the global ~/.xenv.keys file.
+ */
+function readGlobalKeysFile(): GlobalKeysSection[] {
+  const path = join(homedir(), KEYS_FILE);
+  if (!existsSync(path)) return [];
+  return parseGlobalKeysContent(readFileSync(path, "utf-8"));
+}
+
+/**
+ * Resolve a key from ~/.xenv.keys for a given cwd.
+ * Most-specific root match wins. Falls back to global (no-root) section.
+ */
+function resolveGlobalKey(key_name: string, cwd: string): string | undefined {
+  const sections = readGlobalKeysFile();
+  let resolved_cwd: string;
+  try {
+    resolved_cwd = realpathSync(cwd);
+  } catch {
+    resolved_cwd = cwd;
+  }
+
+  // find all root-scoped sections that match cwd, sort by specificity
+  const matches = sections
+    .filter((s): s is GlobalKeysSection & { root: string } => s.root !== null)
+    .filter(s => {
+      let resolved_root: string;
+      try {
+        resolved_root = realpathSync(s.root);
+      } catch {
+        resolved_root = s.root;
+      }
+      return resolved_cwd === resolved_root || resolved_cwd.startsWith(resolved_root + "/");
+    })
+    .sort((a, b) => b.root.length - a.root.length);
+
+  // check most-specific root match
+  if (matches.length > 0 && matches[0].keys[key_name]) {
+    return matches[0].keys[key_name];
+  }
+
+  // check global fallback sections (root === null)
+  for (const section of sections) {
+    if (section.root === null && section.keys[key_name]) {
+      return section.keys[key_name];
+    }
+  }
+
+  return undefined;
+}
+
 /**
  * Resolve the encryption key for an environment.
  *
  * Lookup order:
  *   1. XENV_KEY_{ENV} in process.env
  *   2. XENV_KEY in process.env
- *   3. XENV_KEY_{ENV} in .xenv.keys
- *   4. XENV_KEY in .xenv.keys
+ *   3. XENV_KEY_{ENV} in .xenv.keys (project-local)
+ *   4. XENV_KEY in .xenv.keys (project-local)
+ *   5. XENV_KEY_{ENV} in ~/.xenv.keys (most-specific root match)
+ *   6. XENV_KEY in ~/.xenv.keys (most-specific root match)
+ *   7. XENV_KEY_{ENV} in ~/.xenv.keys (global fallback)
+ *   8. XENV_KEY in ~/.xenv.keys (global fallback)
  */
 export function resolveKey(env: string, cwd?: string): string | undefined {
   const specific = `XENV_KEY_${env.toUpperCase()}`;
+  const resolved_cwd = cwd ?? process.cwd();
 
   // 1-2: check process.env
   if (process.env[specific]) return process.env[specific];
   if (process.env.XENV_KEY) return process.env.XENV_KEY;
 
-  // 3-4: check .xenv.keys file
-  const fileKeys = readKeysFile(cwd);
+  // 3-4: check project-local .xenv.keys
+  const fileKeys = readKeysFile(resolved_cwd);
   if (fileKeys[specific]) return fileKeys[specific];
   if (fileKeys.XENV_KEY) return fileKeys.XENV_KEY;
+
+  // 5-8: check ~/.xenv.keys (root-scoped then global fallback)
+  const global_specific = resolveGlobalKey(specific, resolved_cwd);
+  if (global_specific) return global_specific;
+  const global_fallback = resolveGlobalKey("XENV_KEY", resolved_cwd);
+  if (global_fallback) return global_fallback;
 
   return undefined;
 }
@@ -99,7 +247,54 @@ export function resolveKey(env: string, cwd?: string): string | undefined {
  * Return a description of where keys are looked up. Used in error messages.
  */
 export function keyEnvNames(env: string): string {
-  return `XENV_KEY_${env.toUpperCase()} or XENV_KEY (in env or .xenv.keys)`;
+  return `XENV_KEY_${env.toUpperCase()} or XENV_KEY (in env, .xenv.keys, or ~/.xenv.keys)`;
+}
+
+/**
+ * Collect all encryption key VALUES from project-local and global keys files.
+ * Used by hook and audit to scan for leaked key material.
+ * Only returns values that look like hex keys (64-char hex strings).
+ */
+export function getAllKeyValues(cwd: string = process.cwd()): string[] {
+  const values = new Set<string>();
+  const HEX_KEY = /^[a-f0-9]{64}$/i;
+
+  // project-local keys
+  const local = readKeysFile(cwd);
+  for (const v of Object.values(local)) {
+    if (HEX_KEY.test(v)) values.add(v);
+  }
+
+  // global keys — all sections that match cwd, plus global fallback
+  const sections = readGlobalKeysFile();
+  let resolved_cwd: string;
+  try {
+    resolved_cwd = realpathSync(cwd);
+  } catch {
+    resolved_cwd = cwd;
+  }
+
+  for (const section of sections) {
+    let include = false;
+    if (section.root === null) {
+      include = true;
+    } else {
+      let resolved_root: string;
+      try {
+        resolved_root = realpathSync(section.root);
+      } catch {
+        resolved_root = section.root;
+      }
+      include = resolved_cwd === resolved_root || resolved_cwd.startsWith(resolved_root + "/");
+    }
+    if (include) {
+      for (const v of Object.values(section.keys)) {
+        if (HEX_KEY.test(v)) values.add(v);
+      }
+    }
+  }
+
+  return [...values];
 }
 
 /**
@@ -251,17 +446,29 @@ export async function runDecrypt(env: string): Promise<void> {
 }
 
 /**
- * CLI: xenv keygen @env
+ * CLI: xenv keygen @env [--global]
  *
- * Generates a key and writes it to .xenv.keys in the project directory.
+ * Generates a key and writes it to .xenv.keys (project-local) or
+ * ~/.xenv.keys (global, with a # root: directive scoped to cwd).
  * Creates the file with mode 600 if it doesn't exist.
  * If a key for this env already exists in the file, it is replaced.
  */
-export async function runKeygen(env: string, quiet: boolean = false): Promise<void> {
+export async function runKeygen(env: string, quiet: boolean = false, global: boolean = false): Promise<void> {
   const cwd = process.cwd();
-  const keysPath = join(cwd, KEYS_FILE);
   const keyName = `XENV_KEY_${env.toUpperCase()}`;
   const key = generateKey();
+
+  if (global) {
+    await writeGlobalKey(cwd, keyName, key);
+    if (!quiet) {
+      process.stderr.write(`${keyName} → ~/.xenv.keys (root: ${cwd})\n`);
+      process.stderr.write(`\nfor CI, set this secret:\n`);
+      process.stderr.write(`  ${keyName}="${key}"\n`);
+    }
+    return;
+  }
+
+  const keysPath = join(cwd, KEYS_FILE);
 
   // read existing keys file content (or start fresh)
   let lines: string[] = [];
@@ -301,6 +508,69 @@ export async function runKeygen(env: string, quiet: boolean = false): Promise<vo
     process.stderr.write(`\nfor CI, set this secret:\n`);
     process.stderr.write(`  ${keyName}="${key}"\n`);
   }
+}
+
+/**
+ * Write a key to ~/.xenv.keys under a # root: section for the given cwd.
+ */
+async function writeGlobalKey(cwd: string, keyName: string, key: string): Promise<void> {
+  const globalPath = join(homedir(), KEYS_FILE);
+  const newLine = `${keyName}="${key}"`;
+  const rootDirective = `# root: ${cwd}`;
+
+  if (!existsSync(globalPath)) {
+    // create fresh with header + section
+    const content = GLOBAL_KEYS_FILE_HEADER + rootDirective + "\n" + newLine + "\n";
+    await Bun.write(globalPath, content);
+    chmodSync(globalPath, 0o600);
+    return;
+  }
+
+  const lines = readFileSync(globalPath, "utf-8").split("\n");
+  const prefix = `${keyName}=`;
+
+  // find the # root: <cwd> section
+  let section_start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^#\s*root:\s*(.+)$/);
+    if (m && m[1].trim().replace(/\/+$/, "") === cwd) {
+      section_start = i;
+      break;
+    }
+  }
+
+  if (section_start >= 0) {
+    // find the key within this section (between section_start and next # root: or EOF)
+    let key_line = -1;
+    for (let i = section_start + 1; i < lines.length; i++) {
+      if (lines[i].match(/^#\s*root:/)) break; // next section
+      const trimmed = lines[i].trim();
+      if (trimmed.startsWith(prefix) || trimmed.startsWith(`export ${prefix}`)) {
+        key_line = i;
+        break;
+      }
+    }
+
+    if (key_line >= 0) {
+      lines[key_line] = newLine;
+    } else {
+      // insert after section header
+      lines.splice(section_start + 1, 0, newLine);
+    }
+  } else {
+    // no section for this cwd — append one
+    // ensure blank line before new section
+    const last = lines[lines.length - 1];
+    if (last !== undefined && last.trim() !== "") {
+      lines.push("");
+    }
+    lines.push(rootDirective);
+    lines.push(newLine);
+  }
+
+  const content = lines.join("\n").trimEnd() + "\n";
+  await Bun.write(globalPath, content);
+  chmodSync(globalPath, 0o600);
 }
 
 /**

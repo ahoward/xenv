@@ -1,0 +1,96 @@
+name: archive-traffic
+
+on:
+  schedule:
+    # run daily at 06:00 UTC — GitHub retains 14 days, so daily is safe
+    - cron: "0 6 * * *"
+  workflow_dispatch: # allow manual runs
+
+permissions:
+  contents: write
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: fetch traffic data
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p traffic
+
+          DATE=$(date -u +%Y-%m-%d)
+
+          # fetch all four endpoints
+          gh api repos/${{ github.repository }}/traffic/views \
+            > traffic/views-${DATE}.json
+
+          gh api repos/${{ github.repository }}/traffic/clones \
+            > traffic/clones-${DATE}.json
+
+          gh api repos/${{ github.repository }}/traffic/popular/paths \
+            > traffic/paths-${DATE}.json
+
+          gh api repos/${{ github.repository }}/traffic/popular/referrers \
+            > traffic/referrers-${DATE}.json
+
+          # merge into cumulative file
+          if [ -f traffic/history.json ]; then
+            HISTORY=$(cat traffic/history.json)
+          else
+            HISTORY='{"views":[],"clones":[]}'
+          fi
+
+          # append today's daily data points (deduplicated by timestamp)
+          python3 - "$HISTORY" \
+            traffic/views-${DATE}.json \
+            traffic/clones-${DATE}.json \
+            traffic/paths-${DATE}.json \
+            traffic/referrers-${DATE}.json \
+            <<'PYTHON'
+          import json, sys
+
+          history = json.loads(sys.argv[1])
+          views = json.load(open(sys.argv[2]))
+          clones = json.load(open(sys.argv[3]))
+          paths = json.load(open(sys.argv[4]))
+          referrers = json.load(open(sys.argv[5]))
+
+          # deduplicate by timestamp
+          existing_view_ts = {e["timestamp"] for e in history.get("views", [])}
+          for entry in views.get("views", []):
+              if entry["timestamp"] not in existing_view_ts:
+                  history.setdefault("views", []).append(entry)
+
+          existing_clone_ts = {e["timestamp"] for e in history.get("clones", [])}
+          for entry in clones.get("clones", []):
+              if entry["timestamp"] not in existing_clone_ts:
+                  history.setdefault("clones", []).append(entry)
+
+          # sort by timestamp
+          history["views"].sort(key=lambda x: x["timestamp"])
+          history["clones"].sort(key=lambda x: x["timestamp"])
+
+          # store latest paths and referrers snapshot
+          history["paths_latest"] = paths
+          history["referrers_latest"] = referrers
+
+          with open("traffic/history.json", "w") as f:
+              json.dump(history, f, indent=2)
+          PYTHON
+
+          echo "archived traffic data for ${DATE}"
+
+      - name: commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add traffic/
+          if git diff --cached --quiet; then
+            echo "no new traffic data"
+          else
+            git commit -m "traffic: archive $(date -u +%Y-%m-%d)"
+            git push
+          fi

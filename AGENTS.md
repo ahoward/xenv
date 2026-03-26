@@ -75,7 +75,7 @@ state lives in `bny/`. do not modify state files directly.
 | `xenv init [@env]` | bootstrap xenv in a project | `xenv init` |
 | `xenv encrypt @env` | encrypt plaintext to vault | `xenv encrypt @production` |
 | `xenv decrypt @env` | decrypt vault to plaintext | `xenv decrypt @production` |
-| `xenv keygen @env` | generate an encryption key | `xenv keygen @production` |
+| `xenv keygen @env [--global]` | generate an encryption key | `xenv keygen @production --global` |
 | `xenv edit @env set K=V` | set a secret without decrypting to disk | `xenv edit @production set API_KEY=sk_live_...` |
 | `xenv edit @env delete K` | remove a secret from vault | `xenv edit @production delete OLD_KEY` |
 | `xenv edit @env list` | list vault key names (no values) | `xenv edit @production list --json` |
@@ -157,7 +157,7 @@ bun test              # run all tests
 ## file layout
 
 ```
-.xenv.keys                  encryption keys (gitignored, chmod 600)
+.xenv.keys                  encryption keys (gitignored, chmod 600) — or use ~/.xenv.keys --global
 .env                        legacy base defaults (committed)
 .xenv                       modern base defaults (committed)
 .xenv.production            prod plaintext (gitignored)

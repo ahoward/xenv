@@ -8,7 +8,7 @@
 
 import { existsSync, readFileSync, writeFileSync, chmodSync, readdirSync } from "fs";
 import { join } from "path";
-import { resolveKey, decryptVault } from "./vault";
+import { resolveKey, decryptVault, getAllKeyValues } from "./vault";
 import { parseEnvContent } from "./parse";
 
 // same patterns as audit.ts
@@ -131,6 +131,9 @@ export async function hook_check(cwd: string = process.cwd()): Promise<HookCheck
   // 3. collect known secret values from all vaults
   const known_secrets = await collect_vault_secrets(cwd);
 
+  // 3.5: collect encryption key values from .xenv.keys and ~/.xenv.keys
+  const key_values = getAllKeyValues(cwd);
+
   // 4. scan each added line in the diff
   const diff_entries = parse_diff(diff);
   for (const entry of diff_entries) {
@@ -149,10 +152,25 @@ export async function hook_check(cwd: string = process.cwd()): Promise<HookCheck
         }
       }
 
+      // check against encryption key values
+      for (const kv of key_values) {
+        if (line_content.includes(kv)) {
+          const already = leaks.some(l => l.file === entry.file && l.line === added.line_number);
+          if (!already) {
+            leaks.push({
+              file: entry.file,
+              line: added.line_number,
+              reason: "contains an encryption key value from .xenv.keys",
+            });
+          }
+          break;
+        }
+      }
+
       // check against common secret patterns (for secrets not yet in vaults)
       const value = extract_value_from_line(line_content);
       if (value && looks_like_secret(value)) {
-        // don't double-report if already caught by vault match
+        // don't double-report if already caught by vault or key match
         const already = leaks.some(l => l.file === entry.file && l.line === added.line_number);
         if (!already) {
           leaks.push({

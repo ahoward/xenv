@@ -58,8 +58,9 @@ async function main(): Promise<void> {
   }
 
   if (args.command === "keygen") {
-    await runKeygen(args.env);
-    if (args.json) console.log(JSON.stringify({ ok: true, env: args.env, key_name: `XENV_KEY_${args.env.toUpperCase()}` }));
+    const global = !!args.flags["global"];
+    await runKeygen(args.env, false, global);
+    if (args.json) console.log(JSON.stringify({ ok: true, env: args.env, key_name: `XENV_KEY_${args.env.toUpperCase()}`, global }));
     process.exit(0);
   }
 
@@ -211,7 +212,7 @@ commands:
   xenv init     [@env]                  bootstrap xenv in a project
   xenv encrypt  @env                    encrypt .xenv.{env} to .xenv.{env}.enc
   xenv decrypt  @env                    decrypt .xenv.{env}.enc to .xenv.{env}
-  xenv keygen   @env                    generate a 256-bit encryption key
+  xenv keygen   @env [--global]          generate a 256-bit encryption key
   xenv edit     @env <set|delete|list>  edit secrets without decrypting to disk
   xenv resolve  @env [--json]           dump the merged 7-layer cascade
   xenv diff     @env [--values]         compare plaintext vs vault (keys-only by default)

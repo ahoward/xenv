@@ -142,6 +142,7 @@ Start by running \`xenv doctor\` to check project health, then use the appropria
 - \`xenv diff @<env>\` — compare plaintext vs encrypted vault (keys only by default, \`--values\` to show secrets)
 - \`xenv validate @<env>\` — pre-flight check for missing/empty keys
 - \`xenv rotate @<env>\` — rotate encryption key
+- \`xenv keygen @<env> --global\` — save key to ~/.xenv.keys (outside repo)
 - \`xenv audit --json\` — scan project for security mistakes
 
 ## Security rules

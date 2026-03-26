@@ -208,6 +208,10 @@ function inline(text: string): string {
   let s = text;
   // inline code (must come first to protect contents)
   s = s.replace(/`([^`]+)`/g, (_, code) => `<code>${esc(code)}</code>`);
+  // linked images: [![alt](img-url)](link-url) — must come before plain images and links
+  s = s.replace(/\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)/g, '<a href="$3"><img src="$2" alt="$1"></a>');
+  // images: ![alt](url)
+  s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1">');
   // links: [text](url)
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
   // bold+italic

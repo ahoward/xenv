@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { parseEnvContent } from "./parse";
-import { resolveKey } from "./vault";
+import { resolveKey, getAllKeyValues } from "./vault";
 
 export interface AuditFinding {
   severity: "error" | "warning" | "info";
@@ -131,6 +131,32 @@ export async function audit_project(cwd: string = process.cwd()): Promise<AuditR
     }
   }
 
+  // check: encryption key values leaked into tracked files
+  const key_values = getAllKeyValues(cwd);
+  if (key_values.length > 0) {
+    const tracked = get_tracked_files(cwd);
+    for (const file of tracked) {
+      if (file === ".xenv.keys") continue; // obviously contains its own keys
+      if (is_binary_extension(file)) continue;
+      try {
+        const content = readFileSync(join(cwd, file), "utf-8");
+        for (const kv of key_values) {
+          if (content.includes(kv)) {
+            findings.push({
+              severity: "error",
+              code: "key_value_in_tracked_file",
+              file,
+              message: `${file} contains an encryption key value — this key must be rotated immediately`,
+            });
+            break; // one finding per file
+          }
+        }
+      } catch {
+        // can't read file — skip
+      }
+    }
+  }
+
   return {
     ok: findings.filter(f => f.severity === "error").length === 0,
     findings,
@@ -192,6 +218,29 @@ function pattern_matches(file: string, pattern: string): boolean {
     if (new RegExp(regex_str).test(file)) return true;
   }
   return false;
+}
+
+function get_tracked_files(cwd: string): string[] {
+  try {
+    const proc = Bun.spawnSync(["git", "ls-files"], { cwd });
+    return proc.stdout.toString().trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+const BINARY_EXTENSIONS = new Set([
+  ".enc", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp",
+  ".zip", ".gz", ".tar", ".bz2", ".7z", ".rar",
+  ".woff", ".woff2", ".ttf", ".eot", ".otf",
+  ".pdf", ".exe", ".dll", ".so", ".dylib",
+  ".mp3", ".mp4", ".wav", ".avi", ".mov",
+]);
+
+function is_binary_extension(file: string): boolean {
+  const dot = file.lastIndexOf(".");
+  if (dot === -1) return false;
+  return BINARY_EXTENSIONS.has(file.slice(dot).toLowerCase());
 }
 
 /**
