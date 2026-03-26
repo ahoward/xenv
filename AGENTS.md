@@ -33,7 +33,7 @@ claude mcp add xenv -- xenv mcp
 }
 ```
 
-MCP tools available: `init`, `resolve_env`, `set_secret`, `delete_secret`, `list_secrets`, `encrypt`, `diff`, `rotate_key`, `audit`, `validate`.
+MCP tools available: `doctor`, `init`, `resolve_env`, `set_secret`, `delete_secret`, `list_secrets`, `encrypt`, `diff`, `rotate_key`, `audit`, `validate`, `hook_install`, `hook_check`.
 
 ---
 

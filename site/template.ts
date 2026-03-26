@@ -1,7 +1,7 @@
 /**
  * HTML template for the xenv static site.
  */
-export function wrap_html(body: string, css: string): string {
+export function wrap_html(body: string, css: string, version: string = "1.0.0"): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -45,7 +45,7 @@ export function wrap_html(body: string, css: string): string {
     "description": "AI-native environment runner and secrets manager. Single binary, zero dependencies, AES-256-GCM encrypted vaults, MCP server for AI coding agents.",
     "url": "https://xenv.sh/",
     "downloadUrl": "https://xenv.sh/install.sh",
-    "softwareVersion": "1.0.0",
+    "softwareVersion": "${version}",
     "license": "https://opensource.org/licenses/MIT",
     "offers": {
       "@type": "Offer",

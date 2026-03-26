@@ -66,8 +66,8 @@ async function main(): Promise<void> {
   // rotate command
   if (args.command === "rotate") {
     await rotate_vault_key(args.env);
-    if (args.json) console.log(JSON.stringify({ ok: true, env: args.env }));
-    console.error(`key rotated for @${args.env} — new key saved to .xenv.keys`);
+    const result = { ok: true, env: args.env, message: `key rotated for @${args.env} — new key saved to .xenv.keys` };
+    print_output(result, args.json, (d) => d.message);
     process.exit(0);
   }
 

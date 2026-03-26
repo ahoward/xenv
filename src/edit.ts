@@ -86,7 +86,12 @@ async function save_vault(env: string, data: Record<string, string>, key: string
 /**
  * Set a key in an encrypted vault without exposing plaintext to disk.
  */
+const VALID_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 export async function edit_set(env: string, key: string, value: string, cwd: string = process.cwd()): Promise<EditResult> {
+  if (!VALID_KEY.test(key)) {
+    throw new Error(`invalid key name: "${key}" — must match [A-Za-z_][A-Za-z0-9_]*`);
+  }
   const { data, key: enc_key } = await load_vault(env, cwd);
   data[key] = value;
   await save_vault(env, data, enc_key, cwd);

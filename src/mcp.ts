@@ -352,8 +352,9 @@ export async function handle_jsonrpc_message(raw: string): Promise<string | null
   const is_notification = id === undefined;
 
   // handle notifications (no response)
+  // note: notifications/initialized confirms the client received our initialize response
+  // but we set initialized=true in the initialize handler itself
   if (method === "notifications/initialized") {
-    initialized = true;
     return null;
   }
 
@@ -377,6 +378,7 @@ export async function handle_jsonrpc_message(raw: string): Promise<string | null
     switch (method) {
       case "initialize":
         result = await handle_initialize(params ?? {});
+        initialized = true;
         break;
       case "ping":
         result = {};

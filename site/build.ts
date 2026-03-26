@@ -9,6 +9,7 @@
 import { mkdirSync, existsSync, copyFileSync, readFileSync } from "fs";
 import { join, dirname } from "path";
 import { wrap_html } from "./template";
+import pkg from "../package.json";
 
 const ROOT = join(dirname(import.meta.dir), ".");
 const SITE_DIR = dirname(import.meta.filename ?? import.meta.path);
@@ -26,7 +27,7 @@ async function main() {
 
   // convert and wrap
   const body = md_to_html(readme);
-  const html = wrap_html(body, css);
+  const html = wrap_html(body, css, pkg.version);
 
   // write outputs
   await Bun.write(join(DIST, "index.html"), html);

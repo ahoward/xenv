@@ -63,8 +63,11 @@ export async function resolveEnv(
     }
   }
 
-  // 7. system ENV wins last
-  Object.assign(merged, process.env);
+  // 7. system ENV wins last (but filter out encryption keys)
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith("XENV_KEY")) continue;
+    if (value !== undefined) merged[key] = value;
+  }
 
   return merged;
 }

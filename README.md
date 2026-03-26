@@ -695,11 +695,11 @@ bun run src/cli.ts @development -- echo "it works"
 # compile to binary
 bun build ./src/cli.ts --compile --minify --target=bun-linux-x64 --outfile=xenv
 
-# cross-compile targets
-bun build ./src/cli.ts --compile --minify --target=bun-darwin-arm64 --outfile=xenv-darwin-arm64
-bun build ./src/cli.ts --compile --minify --target=bun-darwin-x64 --outfile=xenv-darwin-x64
-bun build ./src/cli.ts --compile --minify --target=bun-linux-arm64 --outfile=xenv-linux-arm64
-bun build ./src/cli.ts --compile --minify --target=bun-windows-x64 --outfile=xenv-windows-x64.exe
+# cross-compile targets (names match install.sh and GitHub releases)
+bun build ./src/cli.ts --compile --minify --target=bun-darwin-arm64 --outfile=xenv-darwin-aarch64
+bun build ./src/cli.ts --compile --minify --target=bun-darwin-x64 --outfile=xenv-darwin-x86_64
+bun build ./src/cli.ts --compile --minify --target=bun-linux-arm64 --outfile=xenv-linux-aarch64
+bun build ./src/cli.ts --compile --minify --target=bun-windows-x64 --outfile=xenv-windows-x86_64.exe
 ```
 
 ---

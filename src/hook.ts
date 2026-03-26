@@ -185,9 +185,14 @@ export function format_hook_check(result: HookCheckResult): string {
 // ── helpers ──────────────────────────────────────────────────────────
 
 function find_git_dir(cwd: string): string | null {
-  const dot_git = join(cwd, ".git");
-  if (existsSync(dot_git)) return dot_git;
-  return null;
+  let dir = cwd;
+  while (true) {
+    const dot_git = join(dir, ".git");
+    if (existsSync(dot_git)) return dot_git;
+    const parent = join(dir, "..");
+    if (parent === dir) return null; // reached root
+    dir = parent;
+  }
 }
 
 function get_staged_diff(cwd: string): string | null {
