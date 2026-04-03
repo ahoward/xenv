@@ -1,0 +1,57 @@
+{
+  "name": "@xenv/core",
+  "version": "0.1.0",
+  "description": "Programmatic xenv — load encrypted .xenv vaults without the CLI. Zero dependencies.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "bun test",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "env",
+    "dotenv",
+    "secrets",
+    "encryption",
+    "xenv",
+    "environment",
+    "vault",
+    "aes-256-gcm",
+    "mcp",
+    "dotenv-alternative"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ahoward/xenv.git",
+    "directory": "packages/core"
+  },
+  "license": "MIT",
+  "author": "mountainhigh.codes (https://drawohara.io)",
+  "homepage": "https://xenv.sh",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  }
+}

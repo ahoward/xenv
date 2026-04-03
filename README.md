@@ -40,6 +40,25 @@ xenv @development -- env | grep DATABASE_URL
 
 that's 4 commands from nothing to encrypted secrets running in a child process. the `.enc` vault is safe to commit — `.gitignore` is already set up.
 
+### or use as a library (no binary needed)
+
+```typescript
+import { loadEnv } from "@xenv/core";
+
+// load and decrypt — like dotenv but with encryption
+const env = await loadEnv("production");
+console.log(env.DATABASE_URL);
+
+// or inject into process.env
+await loadEnv("production", { inject: true });
+```
+
+```bash
+npm install @xenv/core
+```
+
+same 7-layer cascade, same AES-256-GCM decryption, same key resolution. zero dependencies. works in Node 18+, Bun, and Deno.
+
 ---
 
 ## paste this into your AI agent
