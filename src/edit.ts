@@ -1,7 +1,8 @@
-import { existsSync } from "fs";
+import { existsSync, mkdtempSync, unlinkSync, rmSync, readFileSync, chmodSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 import { parseEnvContent } from "./parse";
-import { decryptVault, encrypt_content, resolveKey, keyEnvNames } from "./vault";
+import { decryptVault, encrypt_content, resolveKey, keyEnvNames, runKeygen } from "./vault";
 
 export interface EditResult {
   env: string;
@@ -119,4 +120,79 @@ export async function edit_delete(env: string, key: string, cwd: string = proces
 export async function edit_list(env: string, cwd: string = process.cwd()): Promise<string[]> {
   const { data } = await load_vault(env, cwd);
   return Object.keys(data).sort();
+}
+
+/**
+ * Open a vault in $EDITOR. Decrypts to a temp file, opens the editor,
+ * re-encrypts on save. Secrets never touch the working tree.
+ */
+export async function edit_interactive(env: string, cwd: string = process.cwd()): Promise<{ changed: boolean }> {
+  const editor = process.env.EDITOR || process.env.VISUAL || "vim";
+  const enc_path = join(cwd, `.xenv.${env}.enc`);
+
+  let plaintext = "";
+  let key: string | undefined;
+
+  if (existsSync(enc_path)) {
+    key = resolveKey(env, cwd);
+    if (!key) {
+      throw new Error(
+        `encryption key not found: ${keyEnvNames(env)}\n` +
+        `run 'xenv keygen @${env}' to generate one`
+      );
+    }
+    plaintext = await decryptVault(enc_path, key);
+  } else {
+    // no vault yet — start with a starter template
+    plaintext = `# .xenv.${env} — add KEY=value pairs, save and quit to encrypt\n`;
+    key = resolveKey(env, cwd);
+    if (!key) {
+      await runKeygen(env, true);
+      key = resolveKey(env, cwd);
+    }
+  }
+
+  // write to a temp file (mode 600)
+  const tmp_dir = mkdtempSync(join(tmpdir(), "xenv-edit-"));
+  const tmp_path = join(tmp_dir, `.xenv.${env}`);
+
+  try {
+    await Bun.write(tmp_path, plaintext);
+    chmodSync(tmp_path, 0o600);
+
+    // hash before editing
+    const hash_before = Bun.hash(plaintext);
+
+    // spawn editor — split EDITOR into command + args (e.g. "code --wait")
+    const editor_parts = editor.split(/\s+/);
+    const proc = Bun.spawn([...editor_parts, tmp_path], {
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    await proc.exited;
+
+    if (proc.exitCode !== 0) {
+      throw new Error(`editor exited with code ${proc.exitCode} — vault unchanged`);
+    }
+
+    // read back
+    const after = readFileSync(tmp_path, "utf-8");
+    const hash_after = Bun.hash(after);
+
+    if (hash_before === hash_after) {
+      process.stderr.write(`xenv: no changes — vault unchanged\n`);
+      return { changed: false };
+    }
+
+    // re-encrypt
+    const encrypted = await encrypt_content(after, key!);
+    await Bun.write(enc_path, encrypted + "\n");
+    process.stderr.write(`xenv: encrypted → .xenv.${env}.enc\n`);
+    return { changed: true };
+  } finally {
+    // always clean up temp file
+    try { unlinkSync(tmp_path); } catch {}
+    try { rmSync(tmp_dir, { recursive: true }); } catch {}
+  }
 }

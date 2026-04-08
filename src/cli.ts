@@ -4,7 +4,7 @@ import { parseArgs } from "./args";
 import { resolveEnv, resolveCascadeOnly } from "./resolve";
 import { runEncrypt, runDecrypt, runKeygen, rotate_vault_key } from "./vault";
 import { run } from "./run";
-import { edit_set, edit_delete, edit_list } from "./edit";
+import { edit_set, edit_delete, edit_list, edit_interactive } from "./edit";
 import { diff_env, format_diff } from "./diff";
 import { validate_env, format_validation } from "./validate";
 import { audit_project, format_audit } from "./audit";
@@ -175,7 +175,9 @@ async function handleEdit(args: ReturnType<typeof parseArgs>): Promise<void> {
     return;
   }
 
-  throw new Error("usage: xenv edit @env <set|delete|list>");
+  // no subcommand — open in $EDITOR
+  const result = await edit_interactive(env);
+  if (json) console.log(JSON.stringify({ ok: true, env, changed: result.changed }));
 }
 
 async function handleHook(args: ReturnType<typeof parseArgs>): Promise<void> {
@@ -213,6 +215,7 @@ commands:
   xenv encrypt  @env                    encrypt .xenv.{env} to .xenv.{env}.enc
   xenv decrypt  @env                    decrypt .xenv.{env}.enc to .xenv.{env}
   xenv keygen   @env [--global]          generate a 256-bit encryption key
+  xenv edit     @env                    open vault in $EDITOR (default: vim)
   xenv edit     @env <set|delete|list>  edit secrets without decrypting to disk
   xenv resolve  @env [--json]           dump the merged 7-layer cascade
   xenv diff     @env [--values]         compare plaintext vs vault (keys-only by default)
