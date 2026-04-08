@@ -76,13 +76,17 @@ state lives in `bny/`. do not modify state files directly.
 | `xenv encrypt @env` | encrypt plaintext to vault | `xenv encrypt @production` |
 | `xenv decrypt @env` | decrypt vault to plaintext | `xenv decrypt @production` |
 | `xenv keygen @env [--global]` | generate an encryption key | `xenv keygen @production --global` |
+| `xenv edit @env` | open vault in `$EDITOR` (default: vim) | `xenv edit @production` |
 | `xenv edit @env set K=V` | set a secret without decrypting to disk | `xenv edit @production set API_KEY=sk_live_...` |
 | `xenv edit @env delete K` | remove a secret from vault | `xenv edit @production delete OLD_KEY` |
 | `xenv edit @env list` | list vault key names (no values) | `xenv edit @production list --json` |
 | `xenv resolve @env` | dump merged cascade | `xenv resolve @production --json` |
 | `xenv diff @env` | compare plaintext vs vault (keys only by default, `--values` to show secrets) | `xenv diff @production` |
 | `xenv validate @env` | pre-flight checks | `xenv validate @production --require DB_URL` |
+| `xenv rotate @env` | rotate encryption key, re-encrypt vault | `xenv rotate @production` |
 | `xenv audit` | security scan | `xenv audit --json` |
+| `xenv doctor` | check project health and agent integration | `xenv doctor --json` |
+| `xenv hook install\|uninstall\|check` | git pre-commit hook (blocks secret leaks) | `xenv hook install` |
 | `xenv mcp` | start MCP server (stdio) | `xenv mcp` |
 
 all commands support `--json` for machine-readable output.

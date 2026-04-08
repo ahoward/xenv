@@ -82,10 +82,15 @@ This installs xenv (encrypted secrets manager, ~10MB binary) and sets up:
 - git pre-commit hook that blocks secret leaks
 
 After setup, you have these commands:
-- xenv doctor                     — check project health
+- xenv doctor                     — check project health (run this first)
+- xenv edit @<env>                — open vault in $EDITOR (decrypts, re-encrypts on save)
 - xenv edit @<env> set KEY=VALUE  — set a secret (never writes plaintext to disk)
+- xenv edit @<env> delete KEY     — remove a secret
 - xenv edit @<env> list           — list secret key names
+- xenv keygen @<env> [--global]   — generate encryption key (--global = outside repo)
 - xenv encrypt @<env>             — encrypt plaintext env file to vault
+- xenv resolve @<env> --json      — dump the merged 7-layer cascade
+- xenv rotate @<env>              — rotate encryption key
 - xenv @<env> -- <command>        — run command with secrets injected
 - xenv audit --json               — scan for security mistakes
 
@@ -136,7 +141,7 @@ no other env tool has any of these.
 
 | | xenv | dotenvx | senv | direnv | dotenv | 1Password CLI |
 |---|---|---|---|---|---|---|
-| **binary size** | ~10 MB | ~20 MB | gem install | ~10 MB | npm/gem | ~100 MB |
+| **binary size** | ~10 MB | 20-40 MB | gem install | ~10 MB | npm/gem | ~100 MB |
 | **runtime deps** | none | Node.js (bundled via pkg) | Ruby | none | Node.js or Ruby | none (but needs account) |
 | **encryption** | AES-256-GCM | ECIES (secp256k1) | Blowfish-CBC | none | none | vault-based |
 | **named envs** | `@production` | `-f .env.production` | `@production` | directory-based | manual | `op://vault/item` |
@@ -190,10 +195,11 @@ xenv encrypt @production    # .xenv.production → .xenv.production.enc
 xenv decrypt @production    # .xenv.production.enc → .xenv.production
 ```
 
-### edit secrets without decrypting to disk
+### edit secrets
 
 ```bash
-xenv edit @production set API_KEY=sk_live_...   # atomic set
+xenv edit @production                           # open vault in $EDITOR (default: vim)
+xenv edit @production set API_KEY=sk_live_...   # atomic set (no editor, no disk)
 xenv edit @production delete OLD_KEY            # atomic delete
 xenv edit @production list                      # key names only
 ```
@@ -466,7 +472,19 @@ here's what happens:
 
 ### editing encrypted secrets
 
-**option A: atomic edit (recommended for scripts and AI agents).**
+**option A: open in your editor.**
+
+```bash
+xenv edit @production
+```
+
+decrypts vault to a temp file, opens `$EDITOR` (or `$VISUAL`, or `vim`), re-encrypts when you save and quit. the temp file is wiped immediately. secrets never land in your working tree.
+
+works with any editor: `EDITOR="code --wait"`, `EDITOR=nano`, etc.
+
+if no vault exists yet, xenv creates a starter template and auto-generates a key.
+
+**option B: atomic set/delete (recommended for scripts and AI agents).**
 
 ```bash
 # set a secret — decrypts in memory, patches, re-encrypts. plaintext never touches disk.
@@ -479,15 +497,7 @@ xenv edit @production delete OLD_KEY
 xenv edit @production list
 ```
 
-**option B: decrypt-edit-encrypt cycle.**
-
-```bash
-xenv decrypt @production
-vim .xenv.production
-xenv encrypt @production
-```
-
-option A is safer — the plaintext never exists as a file. option B is easier when you need to edit many keys at once.
+option A is natural for humans editing multiple keys. option B is safer for automation — plaintext never exists as a file, even temporarily.
 
 ### why symmetric instead of asymmetric?
 
