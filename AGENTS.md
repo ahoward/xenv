@@ -105,12 +105,21 @@ all commands support `--json` for machine-readable output.
 
 ## code style
 
-- **functions/variables**: `snake_case` (e.g., `edit_set`, `resolve_env`)
+**Read [STYLE.md](./STYLE.md) for the full style guide.** Highlights:
+
+- **imports**: namespace imports (`import * as fs from "node:fs"`) — call sites read as `fs.existsSync(p)`, not `existsSync(p)`. This applies to local modules too (`import * as vault from "./vault"`).
+- **functions/variables**: `snake_case` (e.g., `edit_set`, `resolve_env`) — NOT camelCase
 - **types**: `PascalCase` (e.g., `DiffResult`, `ValidationCheck`)
 - **constants**: `SCREAMING_SNAKE` (e.g., `VAULT_HEADER`, `KEY_LENGTH`)
-- **data**: POD only — no classes for data containers. interfaces and type aliases only.
+- **data**: POD only — no classes for data containers, type aliases over interfaces
+- **functions**: arrow `=>` for one-liners, `function` keyword for multi-line procedures
+- **control flow**: early returns, regex over chained `.includes()`, expression form over imperative blocks
+- **defaults**: `??` not `||`, `null` over `undefined` for intentional absence
+- **errors**: throw `Error` with actionable messages — say what's wrong AND what to do
+- **comments**: default to none; comment the *why*, never the *what*
 - **output**: all command output goes through `print_output()` from `src/output.ts`
-- **null over undefined** where possible
+
+When in doubt, optimize for "would a junior dev who knows Ruby/Python understand this?"
 
 ## architecture
 
