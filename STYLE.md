@@ -1,5 +1,7 @@
 # TypeScript style — ahoward
 
+> **Every choice in this guide optimizes for the reader, not the writer.** When in doubt, choose the version that the next person — or you, six months from now — will understand faster.
+
 A personal style guide for TypeScript code. Optimized for **readability when scanning fast**. The goal is code that reads more like Ruby or Python than like Java.
 
 This guide applies to any TypeScript codebase ahoward (or AI agents working on his behalf) writes or maintains.
@@ -8,11 +10,13 @@ This guide applies to any TypeScript codebase ahoward (or AI agents working on h
 
 ## the prime directives
 
-1. **`namespace.method()` reads better than `oneLongCamelCase()`.**
-2. **Less ceremony, fewer keywords, shorter signatures.**
-3. **Types are documentation — keep them out of the way of the code.**
-4. **Snake_case for code, PascalCase for types.**
-5. **POD only — no classes for data containers.**
+1. **Optimize for the reader.** Longer descriptive names, predictable structure, named operations. Generosity to the reader is the deepest principle — every other rule serves this one.
+2. **`namespace.method()` reads better than `oneLongCamelCase()`.**
+3. **Less ceremony, fewer keywords, shorter signatures.**
+4. **Types are documentation — keep them out of the way of the code.**
+5. **Snake_case for code, PascalCase for types.**
+6. **POD only — no classes for data containers.**
+7. **One word per concept, used everywhere.**
 
 If a rule below contradicts these, the prime directives win.
 
@@ -157,6 +161,95 @@ const result = { env, key, action };
 function encryption(plaintext: string, key: string): string { ... }  // sounds like a noun
 const encrypter = { ... };  // sounds like a class
 ```
+
+### names describe the thing, not the type
+
+A name should answer "what is this?" not "what type is this?". The latter is a label; the former is information.
+
+```typescript
+// YES — tells the reader what the value is
+const decrypted_plaintext = await vault.decrypt(blob, key);
+const staged_files = git.staged();
+const home_keys = read_global_keys_file();
+
+// NO — the reader still has to figure out what it is
+const data = await vault.decrypt(blob, key);
+const arr = git.staged();
+const obj = read_global_keys_file();
+```
+
+If you reach for `data`, `value`, `result`, `tmp`, `obj`, or `helper` as a name, you haven't yet decided what the value *is*. Keep going.
+
+**Exception:** `result` is acceptable as a return-value local in a function whose entire purpose is *to compute that one thing*. `tmp` is acceptable for a single-line scratch value. Both should be rare.
+
+### no `and`/`or`/`with`/`then` in function names
+
+If a function name needs a conjunction, it's two functions. Composition belongs at the call site, not in the name.
+
+```typescript
+// NO — name confesses two responsibilities
+async function decrypt_and_parse_vault(path: string, key: Key): Promise<Env>
+function validate_and_save(data: Env): void
+function load_or_init(path: string): Config
+
+// YES — composition is visible at the call site
+const plaintext = await vault.decrypt(path, key);
+const env = parse.env_content(plaintext);
+
+// YES — use a different word that captures the whole operation
+function commit(data: Env): void  // implies validate-then-save
+function open(path: string): Config  // implies load-or-init
+```
+
+### function-name prefixes are contracts
+
+Common prefixes carry expectations. Don't violate them — readers rely on them.
+
+| prefix | contract |
+|---|---|
+| `is_*`, `has_*`, `can_*`, `needs_*` | returns `boolean`, no side effects |
+| `get_*` | read-only access to existing state |
+| `set_*` | write-only, doesn't return the value being set |
+| `parse_*` | pure transformation, no I/O |
+| `format_*` | returns a string for display |
+| `load_*` | does I/O (filesystem, network) |
+| `save_*` | does I/O, writes |
+| `make_*`, `build_*`, `create_*` | constructs and returns a new value |
+| `assert_*` | throws if the condition fails, returns nothing |
+| `require_*` | throws if missing, returns the value |
+| `try_*` | returns `null` or a fallback on failure instead of throwing |
+
+```typescript
+// YES — prefix matches behavior
+function is_secret(value: string): boolean { ... }
+function load_vault(path: string): Promise<Env> { ... }
+function require_key(env: string): string { ... }
+function try_resolve_key(env: string): string | null { ... }
+
+// NO — violates the contract
+function is_valid(input: string): string { return input.trim(); }  // "is_*" must be boolean
+function get_config(path: string): Config { fs.writeFileSync(...); return ... }  // "get_*" doesn't write
+```
+
+### one word per concept
+
+Pick one term per concept and use it everywhere. Mixing `env` / `env_name` / `name` / `environment` for the same idea fragments the codebase and makes grep useless.
+
+```typescript
+// YES — one term, used consistently
+function resolve_key(env: string): string | null { ... }
+function load_vault(env: string): Promise<Env> { ... }
+function encrypt(env: string, plaintext: string): string { ... }
+
+// NO — three names for one concept
+function resolveKey(env_name: string): string | null { ... }
+function loadVault(name: string): Promise<Env> { ... }
+function encrypt(environment: string, plaintext: string): string { ... }
+```
+
+For codebases with multiple concepts that *could* share a name, pick canonical terms early and qualify the less common one. For xenv: `key` always means the encryption key. If you also need a record key in the same scope, the record key gets a qualifier (`record_key`) — never the encryption key.
+
+A short glossary at the top of `AGENTS.md` (or the README) is helpful for projects with non-obvious vocabulary.
 
 ---
 
@@ -804,25 +897,44 @@ function get_editor(): string {
 
 ## file organization
 
+### three regions, in this order
+
+Every file has the same shape, top-to-bottom:
+
+```typescript
+// 1. PRELUDE — imports, types, constants
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+type Vault = { data: Env; key: Key };
+const VAULT_HEADER = "xenv:v1:";
+
+// ── public API ─────────────────────────────────────
+// 2. PUBLIC — what callers use, in order of importance
+
+export async function encrypt(plaintext: string, key: Key): Promise<Cipher> { ... }
+export async function decrypt(cipher: Cipher, key: Key): Promise<string> { ... }
+
+// ── helpers ────────────────────────────────────────
+// 3. INTERNAL — not exported, in order of use
+
+function pack_iv_ct_tag(iv: Bytes, ct: Bytes, tag: Bytes): Bytes { ... }
+function unpack_iv_ct_tag(blob: Bytes): { iv: Bytes; ct: Bytes; tag: Bytes } { ... }
+```
+
+A reader knows exactly where to look:
+
+- **Want to use this module?** Read the public section.
+- **Want to understand how it works?** Read the helpers.
+- **Want to know its dependencies?** Read the prelude.
+
+The order of public functions matters too — most important / most frequently called first. Inverse pairs (encrypt/decrypt, save/load, install/uninstall) sit adjacent, with the "construct" side first.
+
 ### one concept per file
 
 Each file has a single subject. `vault.ts` does vault stuff. `parse.ts` parses. `cli.ts` is the entry point. Don't mix.
 
-### exports at the top, helpers at the bottom
-
-When a file exports public APIs and has internal helpers, list the public stuff first.
-
-```typescript
-// public API
-export function load_env(name: string) { ... }
-export function save_env(env: Env) { ... }
-
-// ── helpers ────────────────────────────────────────
-function normalize(s: string) { ... }
-function expand_escapes(s: string) { ... }
-```
-
-### section dividers for long files
+### section dividers
 
 When a file has multiple logical sections, separate with a simple comment:
 
@@ -832,7 +944,7 @@ When a file has multiple logical sections, separate with a simple comment:
 // ── helpers ──
 ```
 
-Don't go heavy on ASCII art — keep it short. If you need many dividers, the file is too long.
+Don't go heavy on ASCII art. If you need many dividers, the file is too long.
 
 ### long files are a smell
 
@@ -914,6 +1026,155 @@ Bun's APIs (`Bun.file`, `Bun.spawn`, `Bun.write`) are cleaner than Node's. When 
 
 ---
 
+## beauty
+
+Rules get you to *clean*. These principles get you to *beautiful*. Beauty is the stage past correctness — when the code stops describing the computation and starts narrating it.
+
+### code as prose
+
+Each line is a sentence. Each function is a paragraph. Each file is a chapter. A reader should be able to skim a function top-to-bottom and understand what it does without parsing syntax.
+
+```typescript
+// not yet beautiful — eye has to compose meaning
+async function load_vault(env: string, cwd: string) {
+  const enc_path = path.join(cwd, `.xenv.${env}.enc`);
+  if (!fs.existsSync(enc_path)) throw new Error(`vault not found: .xenv.${env}.enc`);
+  const key = vault.resolve_key(env, cwd);
+  if (!key) throw new Error(`encryption key not found: ${vault.key_env_names(env)}`);
+  const plaintext = await vault.decrypt_vault(enc_path, key);
+  const data = parse.env_content(plaintext);
+  return { data, key };
+}
+
+// beautiful — reads as four sentences
+async function load_vault(env: string, cwd: string) {
+  const enc_path = vault_path(env, cwd);
+  const key = require_key(env, cwd);
+  const plaintext = await vault.decrypt(enc_path, key);
+  return { data: parse.env_content(plaintext), key };
+}
+```
+
+The transformation: each line names one operation. Validation gets a name (`require_key`). Path construction gets a name (`vault_path`). Only the irreducible composition (decrypt → parse) appears inline.
+
+**Each line should be one named idea.** If a line has two operations, ask whether one of them deserves a name.
+
+### symmetry
+
+Inverse operations must look like inverses.
+
+```typescript
+// not symmetric — the eye can't see the pair
+async function encrypt_content(plaintext: string, key: string): Promise<string>
+async function decryptContent(blob: string, keyHex: string): Promise<string>
+
+// symmetric — obvious they're inverses
+async function encrypt(text: string, key: Key): Promise<Cipher>
+async function decrypt(cipher: Cipher, key: Key): Promise<string>
+```
+
+Same naming pattern. Same parameter order. Same return shape (modulo the inverse).
+
+When functions come in pairs (encode/decode, save/load, install/uninstall, lock/unlock, push/pop), make them visibly pair. Place them adjacent in the file. The reader who understands one understands the other.
+
+### the function arc
+
+Beautiful functions have shape: a beginning, a middle, an end.
+
+```typescript
+async function rotate_vault_key(env: string, cwd: string) {
+  // 1. validate inputs and resolve dependencies
+  const old_key = require_key(env, cwd);
+  const enc_path = require_vault(env, cwd);
+
+  // 2. do the work
+  const plaintext = await vault.decrypt(enc_path, old_key);
+  const new_key = vault.generate_key();
+  const cipher = await vault.encrypt(plaintext, new_key);
+
+  // 3. commit and return
+  await fs.writeFile(enc_path, cipher);
+  await write_key(env, new_key, cwd);
+  return { env };
+}
+```
+
+A blank line marks each transition. The middle is the longest. Preamble and coda are short.
+
+If the middle has more than three distinct phases, the function is doing too much. Extract them into named helpers and call them from a slimmer top-level function. The top function then reads as a table of contents.
+
+### errors at the boundary, never in the middle
+
+Public functions check their inputs. Private helpers trust what's given.
+
+```typescript
+// not beautiful — every helper defends itself
+function parse_env_name(input: string) {
+  if (typeof input !== "string") throw new Error(...);
+  if (input.length === 0) throw new Error(...);
+  ...
+}
+function format_env_name(name: string) {
+  if (typeof name !== "string") throw new Error(...);
+  ...
+}
+
+// beautiful — boundary validates once, internals trust the contract
+export function process(input: unknown): Output {
+  if (typeof input !== "string") throw new Error("input must be a string");
+  if (input.length === 0) throw new Error("input cannot be empty");
+  return format_env_name(parse_env_name(input));
+}
+
+function parse_env_name(input: string) { /* trusts caller */ }
+function format_env_name(name: string) { /* trusts caller */ }
+```
+
+Defensive programming inside private code is noise. The reader sees five `typeof` checks and assumes some have meaning. They don't. The boundary already did the work.
+
+### tests as a spec
+
+A test file should read like documentation. Each test name is a complete sentence describing a behavior. A reader should be able to scan the file and learn what the function does without ever looking at the implementation.
+
+```typescript
+describe("vault.decrypt", () => {
+  test("round-trips with the same key", () => { ... });
+  test("fails with the wrong key", () => { ... });
+  test("rejects unknown vault versions", () => { ... });
+  test("preserves multiline content", () => { ... });
+});
+```
+
+If you can't write the test name as a sentence about behavior, you don't yet know what you're testing.
+
+### negative space
+
+What you don't write is part of the design.
+
+- A blank line separates logical phases inside a function.
+- An imported utility appears once, not three times.
+- Small functions sit on one screen so the reader's eye doesn't lose its place.
+- Files have a density that matches their purpose: config files dense, algorithm files sparse, glue files medium.
+
+A function with no internal blank lines is either trivially short or insufficiently structured. A file with no blank lines between functions reads as one wall of code.
+
+### the deepest principle
+
+Every choice optimizes for the **reader**, not the writer.
+
+- Names favor the reader (longer, descriptive, single-purpose).
+- Structure favors the reader (predictable regions, top-to-bottom).
+- Errors favor the reader (actionable, located at the boundary).
+- Comments favor the reader (the *why*, never the *what*).
+- Types favor the reader (named aliases, kept out of the way).
+- Tests favor the reader (a spec, not a suite).
+
+When you find yourself writing for the writer's convenience — a clever one-liner, a generic abstraction, a "this saves me typing" macro — stop. Beautiful code is generous to the reader.
+
+---
+
 ## the test
 
 When you can't decide between two ways to write something, ask: **"if a junior dev who knows Ruby/Python read this for the first time, would they understand it?"** If yes, keep it. If no, simplify.
+
+A second test, for when the first feels insufficient: **"will I, six months from now, thank present-me for writing it this way?"**
