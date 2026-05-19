@@ -181,58 +181,17 @@ the version string `v3` is part of the MAC scope. rollback to a future format fa
 
 the encryption key and MAC key are derived from separate halves of a single PBKDF2 output. one passphrase, two keys, no reuse.
 
-## without xenv
+## xenv is just a posix helper
 
-the format is openable with bare `openssl(1)`. if this tool ever disappeared, your data wouldn't. an agent (or a future you, or a future me) staring at a `.value.enc` and a per-env README can recover the plaintext with the recipe below.
+the encrypt/decrypt functions in this repo *are* the spec. each is ~15 lines of POSIX shell with `openssl(1)` calls. nothing else implements anything that isn't visible here.
 
-decrypt one value:
+- [`derive_keys`](bin/xenv#L253) — `passphrase + salt + iter → enc-key + mac-key`. PBKDF2-SHA256.
+- [`encrypt_value`](bin/xenv#L278) — plaintext → `xenv:v3:<iv>:<ct>:<mac>`. AES-256-CBC + HMAC-SHA256.
+- [`decrypt_value`](bin/xenv#L301) — envelope → plaintext. MAC verify first, then decrypt.
 
-```sh
-PASS=$(cat ~/.config/xenv/projects/<project-id>/keys/production)
-SALT=$(awk '/^salt:/ {print $2}' xenv/envs/production/README.md)
-ITER=$(awk '/^iter:/ {print $2}' xenv/envs/production/README.md)
+read those three functions and you've read xenv. any agent with this README and access to those primitives in any language — `openssl`, Python's `cryptography`, Go's `crypto/aes`, Node's `crypto`, Rust's `aes-gcm`/`hmac` — can write its own loader, decrypter, or rotation tool in under 50 lines. there is no proprietary format, no library lock-in, no runtime. **xenv is a convention plus a 1000-line shell wrapper around `openssl(1)`.** the convention is what matters; the wrapper is convenience.
 
-# PBKDF2-SHA256 → 64 bytes; first 32 = enc key, last 32 = MAC key
-KEYS=$(openssl kdf -keylen 64 -kdfopt digest:SHA256 \
-       -kdfopt "pass:$PASS" -kdfopt "hexsalt:$SALT" \
-       -kdfopt "iter:$ITER" -binary PBKDF2 \
-       | od -An -vtx1 | tr -d ' \n')
-ENC_KEY=$(printf '%s' "$KEYS" | cut -c1-64)
-MAC_KEY=$(printf '%s' "$KEYS" | cut -c65-128)
-
-IFS=: read -r _ _ IV CT MAC < xenv/envs/production/HELLO.value.enc
-
-# verify MAC first (encrypt-then-MAC; "v3:<iv>:<ct>" is the MAC scope)
-EXPECTED=$(printf 'v3:%s:%s' "$IV" "$CT" \
-           | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$MAC_KEY" -binary \
-           | od -An -vtx1 | tr -d ' \n')
-[ "$MAC" = "$EXPECTED" ] || { echo "MAC mismatch" >&2; exit 1; }
-
-# decrypt
-printf '%s' "$CT" | xxd -r -p \
-  | openssl enc -d -aes-256-cbc -K "$ENC_KEY" -iv "$IV"
-```
-
-encrypt one value (assuming `$ENC_KEY` + `$MAC_KEY` already derived as above):
-
-```sh
-IV=$(openssl rand -hex 16)
-CT=$(printf '%s' "$plaintext" \
-     | openssl enc -aes-256-cbc -K "$ENC_KEY" -iv "$IV" \
-     | od -An -vtx1 | tr -d ' \n')
-MAC=$(printf 'v3:%s:%s' "$IV" "$CT" \
-      | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$MAC_KEY" -binary \
-      | od -An -vtx1 | tr -d ' \n')
-printf 'xenv:v3:%s:%s:%s\n' "$IV" "$CT" "$MAC" > xenv/envs/production/HELLO.value.enc
-```
-
-inject for one command (no `xenv run` needed, since you have the plaintext):
-
-```sh
-HELLO=$(...the decrypt recipe above...) ./your-command
-```
-
-this isn't a replacement workflow — it's a proof of openness. `xenv` itself uses exactly these primitives (see `derive_keys`, `encrypt_value`, `decrypt_value` in `bin/xenv`).
+if this tool ever disappeared, your data wouldn't.
 
 ## threat model
 

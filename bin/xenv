@@ -64,10 +64,14 @@ info() { printf 'xenv: %s\n' "$*" >&2; }
 
 # ── hex helpers (POSIX awk, no xxd) ───────────────────────────────
 
+# stdin: arbitrary bytes  →  stdout: lowercase hex (no whitespace).
+# uses `od` which is POSIX everywhere; xxd is not guaranteed.
 hex_encode() {
   od -An -vtx1 | tr -d '[:space:]'
 }
 
+# stdin: lowercase hex  →  stdout: arbitrary bytes.
+# inverse of hex_encode. pure awk, no external deps.
 hex_decode() {
   awk '
     BEGIN {
@@ -241,6 +245,11 @@ EOF
 # MAC is HMAC-SHA256 over "v3:<iv-hex>:<ct-hex>" using a separate derived key.
 # Version is part of the MAC, so future v4 envelopes can't be confused with v3.
 
+# derive an encryption key and a MAC key from a passphrase.
+#   args: <passphrase> <salt-hex> <iter>
+#   kdf:  PBKDF2-SHA256, yields 64 bytes (32 enc-key || 32 mac-key)
+#   out:  "<enc-key-hex> <mac-key-hex>" on stdout
+# any language with PBKDF2-SHA256 + HMAC-SHA256 + AES-256-CBC can do this.
 derive_keys() {
   passphrase=$1
   salt_hex=$2
@@ -259,6 +268,13 @@ derive_keys() {
     '{ printf "%s %s\n", substr($0,1,n), substr($0,n+1) }'
 }
 
+# encrypt one value into a v3 envelope.
+#   args:   <enc-key-hex> <mac-key-hex>   (from derive_keys)
+#   stdin:  plaintext bytes (any contents — newlines, binary, etc.)
+#   stdout: "xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>"
+#   cipher: AES-256-CBC, random 16-byte IV
+#   mac:    HMAC-SHA256 over "v3:<iv-hex>:<ct-hex>" — encrypt-then-MAC,
+#           version is in the MAC scope so future formats can't be confused.
 encrypt_value() {
   enc_key_hex=$1
   mac_key_hex=$2
@@ -276,6 +292,12 @@ encrypt_value() {
   printf 'xenv:%s:%s:%s:%s\n' "$XENV_VAULT_VERSION" "$iv_hex" "$ct_hex" "$mac_hex"
 }
 
+# decrypt one v3 envelope.
+#   args:   <enc-key-hex> <mac-key-hex>   (from derive_keys)
+#   stdin:  "xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>" (one line)
+#   stdout: plaintext bytes
+#   order:  parse → field-shape checks → MAC verify → decrypt.
+#           MAC is verified BEFORE decrypt (encrypt-then-MAC discipline).
 decrypt_value() {
   enc_key_hex=$1
   mac_key_hex=$2
@@ -600,58 +622,22 @@ To run a command with all the env's vars injected:
 **Never** decrypt to a plaintext file you might `git add`. There's
 no need — use `xenv get` (in-memory) or `xenv run` (exec-time).
 
-## without xenv
+## xenv is just a posix helper
 
-The format is openable with bare `openssl(1)`. If this tool ever
-disappeared, your data wouldn't.
+The encrypt/decrypt functions in `bin/xenv` *are* the spec. Three
+functions, each ~15 lines:
 
-A `.value.enc` is one line: `xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>`.
-The per-env README frontmatter gives you `iter` and `salt`. The
-passphrase lives wherever you put it.
+- `derive_keys`    — `passphrase + salt + iter → enc-key + mac-key`. PBKDF2-SHA256.
+- `encrypt_value`  — plaintext → `xenv:v3:<iv>:<ct>:<mac>`. AES-256-CBC + HMAC-SHA256.
+- `decrypt_value`  — envelope → plaintext. MAC verify first, then decrypt.
 
-Decrypt one value:
+Read those three functions and you've read xenv. An agent with this
+README and access to those primitives in any language (Python's
+`cryptography`, Go's `crypto/aes`, Node's `crypto`, etc.) can write
+its own loader in under 50 lines. No proprietary format, no library
+lock-in, no runtime.
 
-```sh
-PASS=$(cat ~/.config/xenv/projects/<project-id>/keys/production)
-SALT=$(awk '/^salt:/ {print $2}' xenv/envs/production/README.md)
-ITER=$(awk '/^iter:/ {print $2}' xenv/envs/production/README.md)
-
-# PBKDF2-SHA256 → 64 bytes; first 32 = enc key, last 32 = MAC key
-KEYS=$(openssl kdf -keylen 64 -kdfopt digest:SHA256 \
-       -kdfopt "pass:$PASS" -kdfopt "hexsalt:$SALT" \
-       -kdfopt "iter:$ITER" -binary PBKDF2 \
-       | od -An -vtx1 | tr -d ' \n')
-ENC_KEY=$(printf '%s' "$KEYS" | cut -c1-64)
-MAC_KEY=$(printf '%s' "$KEYS" | cut -c65-128)
-
-IFS=: read -r _ _ IV CT MAC < xenv/envs/production/HELLO.value.enc
-
-# verify MAC first (encrypt-then-MAC; "v3:<iv>:<ct>" is the MAC scope)
-EXPECTED=$(printf 'v3:%s:%s' "$IV" "$CT" \
-           | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$MAC_KEY" -binary \
-           | od -An -vtx1 | tr -d ' \n')
-[ "$MAC" = "$EXPECTED" ] || { echo "MAC mismatch" >&2; exit 1; }
-
-# decrypt
-printf '%s' "$CT" | xxd -r -p \
-  | openssl enc -d -aes-256-cbc -K "$ENC_KEY" -iv "$IV"
-```
-
-Encrypt one value:
-
-```sh
-IV=$(openssl rand -hex 16)
-CT=$(printf '%s' "$plaintext" \
-     | openssl enc -aes-256-cbc -K "$ENC_KEY" -iv "$IV" \
-     | od -An -vtx1 | tr -d ' \n')
-MAC=$(printf 'v3:%s:%s' "$IV" "$CT" \
-      | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$MAC_KEY" -binary \
-      | od -An -vtx1 | tr -d ' \n')
-printf 'xenv:v3:%s:%s:%s\n' "$IV" "$CT" "$MAC" > xenv/envs/production/HELLO.value.enc
-```
-
-`xenv` itself uses exactly this recipe (see the `derive_keys`,
-`encrypt_value`, `decrypt_value` functions in `bin/xenv`).
+If this tool ever disappeared, your data wouldn't.
 
 ## structure
 
