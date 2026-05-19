@@ -3,18 +3,26 @@
 encrypted environment variables. one file per key. every file safe to commit.
 
 ```
-xenv/
-  README.md                          # frontmatter (project id) + docs
-  bin/xenv                           # self-contained copy of the tool
-  envs/
-    production/
-      README.md                      # frontmatter (KDF params) + docs
-      DATABASE_URL.value.enc         # one encrypted variable per file
-      API_KEY.value.enc
-      TLS_CERT.value.enc             # multi-line / binary values ok
-    staging/
-    development/
-    testing/
+xenv
+├── README.md                       # frontmatter (project id) + docs
+├── bin
+│   └── xenv                        # self-contained copy of the tool
+└── envs
+    ├── development
+    │   ├── APP_ENV.value.enc
+    │   └── README.md
+    ├── production
+    │   ├── API_KEY.value.enc       # one encrypted variable per file
+    │   ├── APP_ENV.value.enc
+    │   ├── DATABASE_URL.value.enc
+    │   ├── README.md               # frontmatter (KDF params) + docs
+    │   └── TLS_CERT.value.enc      # multi-line / binary values ok
+    ├── staging
+    │   ├── APP_ENV.value.enc
+    │   └── README.md
+    └── testing
+        ├── APP_ENV.value.enc
+        └── README.md
 ```
 
 ```sh

@@ -1,21 +1,26 @@
 #!/bin/sh
 # xenv — per-key encrypted environment store
 #
-# Project layout:
+# Project layout (after `xenv init`):
 #
-#   xenv/
-#     README.md                    — frontmatter (project id) + docs
-#     bin/
-#       xenv                       — self-contained copy of this script
-#     envs/
-#       production/
-#         README.md                — frontmatter (KDF params) + per-env docs
-#         APP_ENV.value.enc        — encrypted variable (committed)
-#         DATABASE_URL.value.enc
-#         ...
-#       staging/
-#       development/
-#       testing/
+#   xenv
+#   ├── README.md                  — frontmatter (project id) + docs
+#   ├── bin
+#   │   └── xenv                   — self-contained copy of this script
+#   └── envs
+#       ├── development
+#       │   ├── APP_ENV.value.enc
+#       │   └── README.md
+#       ├── production
+#       │   ├── APP_ENV.value.enc  — one encrypted variable per file
+#       │   ├── DATABASE_URL.value.enc
+#       │   └── README.md          — frontmatter (KDF params) + per-env docs
+#       ├── staging
+#       │   ├── APP_ENV.value.enc
+#       │   └── README.md
+#       └── testing
+#           ├── APP_ENV.value.enc
+#           └── README.md
 #
 # Every README.md opens with YAML frontmatter holding the metadata
 # for its directory. Keys are simple (version, iter, salt, id) — the
@@ -597,18 +602,24 @@ no need — use `xenv get` (in-memory) or `xenv run` (exec-time).
 
 ## structure
 
-    xenv/
-      README.md              ← this file (frontmatter: project id)
-      bin/
-        xenv                 ← self-contained copy of the script
-      envs/
-        production/
-          README.md          ← frontmatter (KDF params) + per-env docs
-          APP_ENV.value.enc  ← one encrypted variable
-          ...
-        staging/      ...
-        development/  ...
-        testing/      ...
+    xenv
+    ├── README.md                  ← this file (frontmatter: project id)
+    ├── bin
+    │   └── xenv                   ← self-contained copy of the script
+    └── envs
+        ├── development
+        │   ├── APP_ENV.value.enc
+        │   └── README.md
+        ├── production
+        │   ├── APP_ENV.value.enc  ← one encrypted variable per file
+        │   ├── …                  ← (add more with `xenv set production K=v`)
+        │   └── README.md          ← frontmatter (KDF params) + per-env docs
+        ├── staging
+        │   ├── APP_ENV.value.enc
+        │   └── README.md
+        └── testing
+            ├── APP_ENV.value.enc
+            └── README.md
 EOF
   } > "$XENV_DIR/README.md"
 }
