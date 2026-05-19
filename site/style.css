@@ -1,0 +1,148 @@
+/* xenv.sh — hacker monospace, dark */
+
+:root {
+  --bg: #0d0d0d;
+  --bg-soft: #161616;
+  --fg: #e8e6e0;
+  --fg-dim: #8a8780;
+  --accent: #d4af37;
+  --accent-dim: #8a7028;
+  --rule: #2a2a2a;
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--bg); }
+
+body {
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+  max-width: 56rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, "JetBrains Mono", "Berkeley Mono",
+               "SF Mono", Menlo, Consolas, monospace;
+  font-size: 15px;
+  line-height: 1.55;
+  font-feature-settings: "calt" 1, "liga" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* headings */
+h1, h2, h3, h4 {
+  color: var(--fg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 2.5rem 0 1rem;
+}
+h1 {
+  font-size: 2.2rem;
+  margin-top: 0;
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 0.75rem;
+}
+h2 {
+  font-size: 1.3rem;
+  color: var(--accent);
+  margin-top: 3rem;
+}
+h2::before { content: "## "; color: var(--accent-dim); }
+h3 { font-size: 1.05rem; color: var(--accent); }
+h3::before { content: "### "; color: var(--accent-dim); }
+
+/* prose */
+p { margin: 0.9rem 0; }
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-dim);
+}
+a:hover { border-bottom-color: var(--accent); }
+
+strong { color: var(--fg); font-weight: 700; }
+em     { color: var(--fg); font-style: italic; }
+
+/* lists */
+ul, ol { padding-left: 1.5rem; margin: 0.9rem 0; }
+li { margin: 0.25rem 0; }
+ul li::marker { color: var(--accent-dim); }
+
+/* code */
+code {
+  font-family: inherit;
+  background: var(--bg-soft);
+  color: var(--fg);
+  padding: 0.1em 0.35em;
+  border-radius: 2px;
+  font-size: 0.95em;
+}
+
+pre {
+  background: var(--bg-soft);
+  border-left: 2px solid var(--accent-dim);
+  padding: 1rem 1.25rem;
+  margin: 1.2rem 0;
+  overflow-x: auto;
+  line-height: 1.5;
+  font-size: 0.92em;
+}
+pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: 1em;
+}
+
+/* keep the file-tree drawings readable */
+pre, pre code { white-space: pre; }
+
+/* horizontal rule */
+hr {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  margin: 3rem 0;
+}
+
+/* tables (rare in this doc but support them) */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.95em;
+}
+th, td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--rule);
+}
+th { color: var(--accent); }
+
+/* blockquotes — rare here but support them */
+blockquote {
+  border-left: 2px solid var(--rule);
+  margin: 1rem 0;
+  padding: 0.25rem 1rem;
+  color: var(--fg-dim);
+}
+
+/* footer */
+footer {
+  margin-top: 4rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--rule);
+  color: var(--fg-dim);
+  font-size: 0.85em;
+}
+footer a { color: var(--fg-dim); border-bottom-color: var(--rule); }
+footer a:hover { color: var(--accent); border-bottom-color: var(--accent-dim); }
+
+/* selection */
+::selection { background: var(--accent-dim); color: var(--bg); }
+
+/* small screens */
+@media (max-width: 640px) {
+  body { padding: 2rem 1rem 4rem; font-size: 14px; }
+  h1   { font-size: 1.7rem; }
+}

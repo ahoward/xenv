@@ -1,0 +1,80 @@
+#!/bin/sh
+# build the xenv.sh static site.
+#
+# input:  README.md (repo root)
+# output: _site/index.html + _site/style.css
+#
+# dependencies: sh, pandoc, mkdir, cp.
+# pandoc 2.0+ (any version on a modern distro will do).
+
+set -eu
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+SITE="$ROOT/site"
+DIST="$ROOT/_site"
+
+command -v pandoc >/dev/null 2>&1 || {
+  echo "site/build: pandoc not found — apt-get install pandoc" >&2
+  exit 1
+}
+
+mkdir -p "$DIST"
+
+pandoc "$ROOT/README.md" \
+  --from=gfm \
+  --to=html5 \
+  --template="$SITE/template.html" \
+  --metadata=title:xenv \
+  --no-highlight \
+  --output="$DIST/index.html"
+
+cp "$SITE/style.css" "$DIST/style.css"
+
+# tiny robots + a llms.txt so AI crawlers know what this project is.
+# (machine-readable summary aimed at coding agents, not just web bots.)
+cat > "$DIST/robots.txt" <<'EOF'
+User-agent: *
+Allow: /
+EOF
+
+cat > "$DIST/llms.txt" <<'EOF'
+# xenv
+
+> A pure-POSIX shell tool for per-key encrypted environment variables.
+> Every file in xenv/ is safe to commit by design — encrypted at rest,
+> the passphrase lives outside the repo in your keychain / pass / a file
+> under ~/.config/xenv/projects/<id>/keys/. Agents that run `git add .`
+> can't leak what isn't there.
+
+## install
+
+    git clone https://github.com/ahoward/xenv
+    cp xenv/bin/xenv ~/bin/xenv && chmod +x ~/bin/xenv
+
+## usage
+
+    xenv init                                # bootstrap xenv/ in this project
+    xenv set    production KEY=value         # store an encrypted value
+    xenv set    production KEY < file        # multi-line / binary value
+    xenv get    production KEY               # decrypt (silent on success)
+    xenv list   production                   # list key names (no passphrase needed)
+    xenv run    production ./server          # exec a command with env injected
+    xenv rotate production                   # rotate passphrase, re-encrypt all
+    xenv edit   production KEY               # decrypt → $EDITOR → re-encrypt
+
+## design
+
+- one POSIX shell script (`bin/xenv`), no daemon, no package manager
+- each variable is one file: `xenv/envs/<env>/KEY.value.enc`
+- KDF params live in YAML frontmatter at the top of each per-env README
+- AES-256-CBC + HMAC-SHA256 (encrypt-then-MAC), PBKDF2-SHA256 200k iter
+- passphrase resolution: `$XENV_KEY_<ENV>` → `$XENV_KEY` → file → macOS keychain → pass
+- every file is text and grep-friendly
+- nothing in xenv/ is plaintext; nothing requires a `.gitignore`
+
+## source
+
+https://github.com/ahoward/xenv
+EOF
+
+echo "site/build: wrote $DIST/index.html, style.css, robots.txt, llms.txt"
