@@ -41,7 +41,7 @@ xenv rotate production               # new passphrase, re-encrypt every key
 
 - **per-key files** — surgical diffs. rotate one secret, touch one file. no merge conflicts when two devs add different keys. multi-line values (PEM, JSON, certs) just work.
 - **every file safe to commit** — by design. no `.gitignore` to forget. no plaintext on disk. agents that `git add .` can't leak what isn't there.
-- **one POSIX shell script** — no daemon, no package manager, no runtime. `sh + openssl + awk`. 62 tests pass under `/bin/sh` and `/usr/bin/dash`.
+- **one POSIX shell script** — no daemon, no package manager, no runtime. `sh + openssl + awk`. 63 tests pass under `/bin/sh` and `/usr/bin/dash`.
 
 ## usage
 
@@ -134,8 +134,7 @@ per-env `xenv/envs/production/README.md`:
 ```yaml
 ---
 # xenv crypto state — DO NOT EDIT — managed by xenv
-# changing any value in this block breaks decryption of every
-# .value.enc file in this directory. salt and iter are public.
+# changing these breaks decryption. rotate with: xenv rotate production
 version: v3
 iter: 200000
 salt: a449a01266a1adf926a541ecd72dd2c2
@@ -278,7 +277,7 @@ test/run.sh                                # uses $SHELL_BIN or /bin/sh
 SHELL_BIN=/usr/bin/dash test/run.sh        # verify strict POSIX
 ```
 
-62 tests. covers init layout, per-key file model, frontmatter parser at both scopes, DO-NOT-EDIT warnings on both READMEs, rotation preserving the README body, project-id uniqueness, MAC tamper detection, multi-line and PEM values, concurrent writes, partial-failure atomicity, env-var precedence, and the rest.
+63 tests. covers init layout, per-key file model, frontmatter parser at both scopes, DO-NOT-EDIT warnings on both READMEs, rotation preserving the README body, project-id uniqueness, MAC tamper detection, multi-line and PEM values, concurrent writes, partial-failure atomicity, env-var precedence, top-level README documenting `XENV_KEY_<ENV>`, and the rest.
 
 ## notes
 

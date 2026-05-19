@@ -382,10 +382,7 @@ write_frontmatter() {
   cat <<EOF
 ---
 # xenv crypto state — DO NOT EDIT — managed by xenv
-# changing any value in this block breaks decryption of every
-# .value.enc file in this directory. salt and iter are public
-# (not secrets); the passphrase that pairs with them is stored
-# outside the repo. rotate with: xenv rotate $env_name
+# changing these breaks decryption. rotate with: xenv rotate $env_name
 version: $XENV_VAULT_VERSION
 iter: $iter
 salt: $salt_hex
@@ -533,9 +530,7 @@ write_top_readme() {
     cat <<EOF
 ---
 # xenv project state — DO NOT EDIT — managed by xenv
-# this id binds this checkout to a local passphrase storage
-# location at ~/.config/xenv/projects/<id>/. it's safe to commit
-# (the secret is the passphrase that lives there, not this id).
+# id binds this checkout to ~/.config/xenv/projects/<id>/
 version: $XENV_PROJECT_FORMAT
 id: $project_id
 ---
@@ -554,9 +549,6 @@ secrets management for discerning developers.
 this README can clone that repo to inspect the script, the test
 suite, and the wire format documentation. The script itself lives
 at `xenv/bin/xenv` inside *this* project — a self-contained copy.
-
-The block above is project state — see the warning. Everything below
-is yours to edit.
 
 ## for humans
 
@@ -697,35 +689,8 @@ write_env_readme() {
 
 # xenv/$env_name
 
-Encrypted environment variables for **$env_name**.
-
-The block above is crypto state — see the warning. Everything below
-is yours to edit.
-
-## variables
-
-Document each variable here. Replace this section as the project evolves.
-
-| variable | description | how to obtain |
-|---|---|---|
-| APP_ENV | environment name (always \`$env_name\`) | — |
-
-## commands
-
-    xenv list $env_name                       # show what's defined
-    xenv set  $env_name DATABASE_URL=...      # add or replace
-    xenv get  $env_name DATABASE_URL          # read one value
-    xenv run  $env_name ./server              # run with env injected
-
-## passphrase
-
-Stored locally under \`~/.config/xenv/projects/<id>/keys/$env_name\` (mode 600), or in
-the macOS keychain / \`pass\`, or as the \`$(env_var_name "$env_name")\`
-environment variable. The passphrase is **not** in this directory and
-must never be committed.
-
-For CI, set \`$(env_var_name "$env_name")\` as a secret in the
-platform's secret store.
+(Document the variables this env needs as you go. See \`xenv help\` and
+\`xenv/README.md\` for commands and passphrase resolution.)
 EOF
   } > "$(readme_file "$env_name")"
 }

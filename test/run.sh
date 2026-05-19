@@ -150,10 +150,18 @@ test_init_app_env_decrypts_to_env_name() {
 }
 
 test_init_per_env_readme_mentions_env_name() {
+  # per-env README is intentionally minimal — it carries the crypto-state
+  # frontmatter and a stub body that names the env. that's it.
   xenv init >/dev/null 2>&1
   grep -q "production" xenv/envs/production/README.md || return 1
   grep -q "staging"    xenv/envs/staging/README.md    || return 1
-  grep -q "XENV_KEY_PRODUCTION" xenv/envs/production/README.md || return 1
+}
+
+test_init_top_readme_documents_passphrase_env_vars() {
+  # the XENV_KEY_<ENV> documentation lives in the top-level xenv/README.md
+  # now — one place, not duplicated per env.
+  xenv init >/dev/null 2>&1
+  grep -q "XENV_KEY_<ENV>" xenv/README.md || return 1
 }
 
 test_init_refuses_to_reinit() {
@@ -772,6 +780,8 @@ run_test "init creates four envs"                   test_init_creates_four_envs
 run_test "init stores passphrase per env"           test_init_stores_passphrase_per_env
 run_test "init APP_ENV decrypts to env name"        test_init_app_env_decrypts_to_env_name
 run_test "init per-env README mentions env name"    test_init_per_env_readme_mentions_env_name
+run_test "init top README documents passphrase env vars" \
+                                                    test_init_top_readme_documents_passphrase_env_vars
 run_test "init refuses to re-init"                  test_init_refuses_to_reinit
 
 # project id
