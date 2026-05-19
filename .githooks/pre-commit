@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-set -e
-
-# bny:start
-./dev/post_flight
-# bny:end

@@ -1,0 +1,727 @@
+#!/bin/sh
+# xenv test suite — xenv/ layout, per-key file model.
+#
+# Focused on the behaviors that matter: correct round-trips, atomic writes,
+# MAC integrity, multi-line values, rich init, key resolution.
+
+set -u
+
+SHELL_BIN=${SHELL_BIN:-/bin/sh}
+XENV="$(cd "$(dirname "$0")/.." && pwd)/bin/xenv"
+
+PASS=0
+FAIL=0
+FAILED_TESTS=""
+
+# ── harness ────────────────────────────────────────────────────────
+
+setup_tmp() {
+  TMP=$(mktemp -d "${TMPDIR:-/tmp}/xenv-test.XXXXXXXX")
+  TEST_CONFIG="$TMP/config"
+  mkdir -p "$TEST_CONFIG"
+  export XDG_CONFIG_HOME="$TEST_CONFIG"
+  cd "$TMP" || exit 1
+}
+
+teardown_tmp() {
+  cd / || true
+  rm -rf "$TMP"
+  unset XDG_CONFIG_HOME TMP TEST_CONFIG
+}
+
+xenv() {
+  "$SHELL_BIN" "$XENV" "$@"
+}
+
+assert_eq() {
+  if [ "$1" = "$2" ]; then return 0; fi
+  printf '    FAIL: %s\n      expected: %s\n      actual:   %s\n' "$3" "$1" "$2" >&2
+  return 1
+}
+
+# helper: path to the current project's keys directory, derived from
+# xenv/project.xenv. tests use this to inspect or tamper with stored keys.
+project_keys_dir() {
+  id=$(cut -d: -f2 xenv/project.xenv)
+  printf '%s/xenv/projects/%s/keys' "$TEST_CONFIG" "$id"
+}
+
+run_test() {
+  name=$1
+  fn=$2
+  printf '  %s ... ' "$name"
+  setup_tmp
+  if "$fn"; then
+    PASS=$((PASS + 1))
+    printf 'ok\n'
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_TESTS="$FAILED_TESTS\n  - $name"
+    printf 'FAIL\n'
+  fi
+  teardown_tmp
+}
+
+# ── basics ─────────────────────────────────────────────────────────
+
+test_version() {
+  case "$(xenv version)" in xenv\ *) return 0 ;; *) return 1 ;; esac
+}
+
+# ── init creates the full layout ──────────────────────────────────
+
+test_init_creates_xenv_dir() {
+  xenv init >/dev/null 2>&1
+  [ -d xenv ] || return 1
+  # no .gitignore — every file in xenv/ is safe to commit
+  [ ! -f .gitignore ] || return 1
+  return 0
+}
+
+test_init_creates_top_readme() {
+  xenv init >/dev/null 2>&1
+  [ -f xenv/README.md ] || return 1
+  grep -qi "for humans" xenv/README.md || return 1
+  grep -qi "for agents" xenv/README.md || return 1
+}
+
+test_init_creates_bin_xenv() {
+  xenv init >/dev/null 2>&1
+  [ -f xenv/bin/xenv ] || return 1
+  [ -x xenv/bin/xenv ] || return 1
+  # the embedded copy should run
+  "$SHELL_BIN" xenv/bin/xenv version >/dev/null 2>&1 || return 1
+}
+
+test_init_creates_four_envs() {
+  xenv init >/dev/null 2>&1
+  [ -d xenv/envs ] || return 1
+  for env_name in testing development staging production; do
+    [ -d "xenv/envs/$env_name" ] || return 1
+    [ -f "xenv/envs/$env_name/params.xenv" ] || return 1
+    [ -f "xenv/envs/$env_name/README.md" ] || return 1
+    [ -f "xenv/envs/$env_name/APP_ENV.value.enc" ] || return 1
+  done
+  return 0
+}
+
+test_init_stores_passphrase_per_env() {
+  xenv init >/dev/null 2>&1
+  kdir=$(project_keys_dir)
+  for env_name in testing development staging production; do
+    [ -f "$kdir/$env_name" ] || return 1
+  done
+  return 0
+}
+
+test_init_app_env_decrypts_to_env_name() {
+  xenv init >/dev/null 2>&1
+  for env_name in testing development staging production; do
+    out=$(xenv get "$env_name" APP_ENV)
+    assert_eq "$env_name" "$out" "APP_ENV for $env_name" || return 1
+  done
+  return 0
+}
+
+test_init_per_env_readme_mentions_env_name() {
+  xenv init >/dev/null 2>&1
+  grep -q "production" xenv/envs/production/README.md || return 1
+  grep -q "staging"    xenv/envs/staging/README.md    || return 1
+  grep -q "XENV_KEY_PRODUCTION" xenv/envs/production/README.md || return 1
+}
+
+test_init_refuses_to_reinit() {
+  xenv init >/dev/null 2>&1
+  out=$(xenv init 2>&1) && return 1
+  echo "$out" | grep -qi "already exists" || return 1
+}
+
+# ── project id ────────────────────────────────────────────────────
+
+test_init_creates_project_xenv() {
+  xenv init >/dev/null 2>&1
+  [ -f xenv/project.xenv ] || return 1
+  # v1:<sanitized-basename>--<32-hex>
+  contents=$(cat xenv/project.xenv)
+  case "$contents" in
+    "v1:"*--*) ;;
+    *) return 1 ;;
+  esac
+  # extract the id and verify the uuid suffix is 32 lowercase hex chars
+  id=${contents#v1:}
+  uuid=${id##*--}
+  [ ${#uuid} -eq 32 ] || return 1
+  case "$uuid" in
+    *[!0-9a-f]*) return 1 ;;
+  esac
+  return 0
+}
+
+test_init_creates_per_project_config_dir() {
+  xenv init >/dev/null 2>&1
+  id=$(cut -d: -f2 xenv/project.xenv)
+  pdir="$TEST_CONFIG/xenv/projects/$id"
+  [ -d "$pdir" ]         || return 1
+  [ -d "$pdir/keys" ]    || return 1
+  [ -f "$pdir/origin" ]  || return 1
+  [ -f "$pdir/notes.md" ] || return 1
+}
+
+test_init_origin_file_records_xenv_path() {
+  xenv init >/dev/null 2>&1
+  id=$(cut -d: -f2 xenv/project.xenv)
+  origin=$(cat "$TEST_CONFIG/xenv/projects/$id/origin")
+  expected=$(cd xenv && pwd)
+  assert_eq "$expected" "$origin" "origin records absolute xenv/ path"
+}
+
+test_init_notes_stub_mentions_project_id() {
+  xenv init >/dev/null 2>&1
+  id=$(cut -d: -f2 xenv/project.xenv)
+  grep -q "$id" "$TEST_CONFIG/xenv/projects/$id/notes.md" || return 1
+}
+
+test_two_projects_same_basename_get_unique_ids() {
+  # critical: this is the bug the project-id system was added to solve.
+  # two projects named "foo" must NOT collide on key storage.
+  mkdir -p "$TMP/a/foo" "$TMP/b/foo"
+
+  cd "$TMP/a/foo"
+  xenv init >/dev/null 2>&1
+  id_a=$(cut -d: -f2 xenv/project.xenv)
+
+  cd "$TMP/b/foo"
+  xenv init >/dev/null 2>&1
+  id_b=$(cut -d: -f2 xenv/project.xenv)
+
+  # both should have "foo--" prefix
+  case "$id_a" in foo--*) ;; *) return 1 ;; esac
+  case "$id_b" in foo--*) ;; *) return 1 ;; esac
+  # but be different
+  [ "$id_a" != "$id_b" ] || return 1
+  # and have separate key dirs
+  [ -d "$TEST_CONFIG/xenv/projects/$id_a/keys" ] || return 1
+  [ -d "$TEST_CONFIG/xenv/projects/$id_b/keys" ] || return 1
+
+  # final sanity: each project's APP_ENV decrypts independently with its own key
+  cd "$TMP/a/foo"; out_a=$(xenv get production APP_ENV)
+  cd "$TMP/b/foo"; out_b=$(xenv get production APP_ENV)
+  assert_eq "production" "$out_a" "project a decrypts" || return 1
+  assert_eq "production" "$out_b" "project b decrypts" || return 1
+}
+
+test_basename_sanitization() {
+  # project basenames with weird chars get sanitized
+  mkdir -p "$TMP/My Project!"
+  cd "$TMP/My Project!"
+  xenv init >/dev/null 2>&1
+  id=$(cut -d: -f2 xenv/project.xenv)
+  # should be lowercase, non-alnum→-, collapsed runs
+  case "$id" in
+    my-project--*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+test_no_project_xenv_means_no_key_lookup() {
+  # without project.xenv, any operation that needs a key must fail cleanly.
+  # (list doesn't need a key — it just `ls`s files. but get does.)
+  mkdir -p xenv/envs/production
+  # plant a syntactically-valid envelope so we get past the file-exists check
+  # and into the key-lookup path
+  printf 'xenv:v3:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n' \
+    > xenv/envs/production/APP_ENV.value.enc
+
+  out=$(xenv get production APP_ENV 2>&1) && return 1
+  echo "$out" | grep -qi "no key\|run 'xenv init'\|project.xenv" || return 1
+  return 0
+}
+
+test_init_params_file_format() {
+  xenv init >/dev/null 2>&1
+  # v3:<iter>:<32-hex-char-salt>
+  case "$(cat xenv/envs/production/params.xenv)" in
+    "v3:200000:"*) ;;
+    *) return 1 ;;
+  esac
+  # salt is 32 hex chars
+  salt=$(cut -d: -f3 xenv/envs/production/params.xenv)
+  [ ${#salt} -eq 32 ] || return 1
+}
+
+test_init_value_files_are_v3_envelopes() {
+  xenv init >/dev/null 2>&1
+  case "$(cat xenv/envs/development/APP_ENV.value.enc)" in
+    "xenv:v3:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+test_init_bin_xenv_is_self_contained() {
+  # rm the parent script's source — xenv/bin/xenv should still work
+  xenv init >/dev/null 2>&1
+  out=$("$SHELL_BIN" xenv/bin/xenv get development APP_ENV 2>&1)
+  assert_eq "development" "$out" "self-contained bin works"
+}
+
+# ── set/get/list/unset ─────────────────────────────────────────────
+
+test_set_creates_one_value_file() {
+  xenv init >/dev/null 2>&1
+  xenv set production DB_URL=postgres://localhost/db >/dev/null 2>&1
+  [ -f xenv/envs/production/DB_URL.value.enc ] || return 1
+}
+
+test_set_inline_round_trip() {
+  xenv init >/dev/null 2>&1
+  xenv set production GREETING="hello world" >/dev/null 2>&1
+  out=$(xenv get production GREETING)
+  assert_eq "hello world" "$out" "round trip"
+}
+
+test_set_value_with_equals_signs() {
+  xenv init >/dev/null 2>&1
+  xenv set production URL="https://api.example.com?key=abc&token=xyz" >/dev/null 2>&1
+  out=$(xenv get production URL)
+  assert_eq "https://api.example.com?key=abc&token=xyz" "$out" "= signs"
+}
+
+test_set_value_with_quotes_no_rce() {
+  xenv init >/dev/null 2>&1
+  marker="$TMP/pwned"
+  rm -f "$marker"
+  xenv set production EVIL='";touch '"$marker"';#`echo bad`' >/dev/null 2>&1
+  xenv run production true >/dev/null 2>&1
+  if [ -f "$marker" ]; then
+    rm -f "$marker"
+    return 1
+  fi
+  return 0
+}
+
+test_set_from_stdin_multiline() {
+  xenv init >/dev/null 2>&1
+  printf 'line1\nline2\nline3' | xenv set production MULTI >/dev/null 2>&1
+  out=$(xenv get production MULTI)
+  expected=$(printf 'line1\nline2\nline3')
+  assert_eq "$expected" "$out" "multi-line"
+}
+
+test_set_pem_key() {
+  xenv init >/dev/null 2>&1
+  pem='-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDfake==
+-----END PRIVATE KEY-----'
+  printf '%s' "$pem" | xenv set production PEM_KEY >/dev/null 2>&1
+  out=$(xenv get production PEM_KEY)
+  assert_eq "$pem" "$out" "PEM round-trip"
+}
+
+test_unset_removes_file() {
+  xenv init >/dev/null 2>&1
+  xenv set production FOO=bar >/dev/null 2>&1
+  [ -f xenv/envs/production/FOO.value.enc ] || return 1
+  xenv unset production FOO >/dev/null 2>&1
+  [ -f xenv/envs/production/FOO.value.enc ] && return 1
+  return 0
+}
+
+test_list_shows_starter_app_env() {
+  xenv init >/dev/null 2>&1
+  out=$(xenv list production)
+  echo "$out" | grep -q "^APP_ENV$" || return 1
+}
+
+test_list_shows_new_keys() {
+  xenv init >/dev/null 2>&1
+  xenv set production ALPHA=1 >/dev/null 2>&1
+  xenv set production BETA=2 >/dev/null 2>&1
+  out=$(xenv list production)
+  echo "$out" | grep -q "^APP_ENV$" || return 1
+  echo "$out" | grep -q "^ALPHA$"   || return 1
+  echo "$out" | grep -q "^BETA$"    || return 1
+}
+
+test_get_silent_on_success() {
+  xenv init >/dev/null 2>&1
+  noise=$(xenv get production APP_ENV 2>&1 >/dev/null)
+  [ -z "$noise" ] || return 1
+}
+
+test_get_missing_key_fails() {
+  xenv init >/dev/null 2>&1
+  xenv get production DOESNOTEXIST >/dev/null 2>&1 && return 1
+  return 0
+}
+
+# ── envs ───────────────────────────────────────────────────────────
+
+test_envs_lists_all_four() {
+  xenv init >/dev/null 2>&1
+  out=$(xenv envs)
+  echo "$out" | grep -q "production" || return 1
+  echo "$out" | grep -q "staging"    || return 1
+  echo "$out" | grep -q "development" || return 1
+  echo "$out" | grep -q "testing"    || return 1
+}
+
+test_envs_only_iterates_envs_dir() {
+  # tool dirs (xenv/bin/) and any future siblings of xenv/envs/ must NEVER
+  # appear in the envs list, no matter what they're named.
+  xenv init >/dev/null 2>&1
+  mkdir -p xenv/lib xenv/share
+  out=$(xenv envs)
+  echo "$out" | grep -qw "bin"   && return 1
+  echo "$out" | grep -qw "lib"   && return 1
+  echo "$out" | grep -qw "share" && return 1
+  return 0
+}
+
+# ── run ────────────────────────────────────────────────────────────
+
+test_run_injects_env() {
+  xenv init >/dev/null 2>&1
+  xenv set production FOO=bar >/dev/null 2>&1
+  xenv set production DB_URL="postgres://localhost/test" >/dev/null 2>&1
+  out=$(xenv run production sh -c 'echo "$FOO,$DB_URL,$APP_ENV"')
+  assert_eq "bar,postgres://localhost/test,production" "$out" "run injection"
+}
+
+test_run_preserves_multiline() {
+  xenv init >/dev/null 2>&1
+  pem='line1
+line2
+line3'
+  printf '%s' "$pem" | xenv set production PEM >/dev/null 2>&1
+  lines=$(xenv run production sh -c 'printf "%s" "$PEM"' | wc -l)
+  assert_eq "2" "$lines" "multi-line preserved"
+}
+
+test_run_propagates_exit_code() {
+  xenv init >/dev/null 2>&1
+  xenv run production sh -c 'exit 42' >/dev/null 2>&1
+  assert_eq "42" "$?" "exit code passes through"
+}
+
+test_run_no_command_fails() {
+  xenv init >/dev/null 2>&1
+  out=$(xenv run production 2>&1) && return 1
+  echo "$out" | grep -qi "needs a command" || return 1
+}
+
+test_run_no_env_fails() {
+  xenv run 2>&1 >/dev/null && return 1
+  return 0
+}
+
+test_run_dash_shorthand() {
+  xenv init >/dev/null 2>&1
+  out=$(xenv -- production sh -c 'echo "$APP_ENV"')
+  assert_eq "production" "$out" "xenv -- shorthand"
+}
+
+# ── edit ───────────────────────────────────────────────────────────
+
+test_edit_round_trip() {
+  xenv init >/dev/null 2>&1
+  cat > "$TMP/ed.sh" <<'EOF'
+#!/bin/sh
+printf 'changed' > "$1"
+EOF
+  chmod +x "$TMP/ed.sh"
+  EDITOR="$TMP/ed.sh" xenv edit production APP_ENV >/dev/null 2>&1
+  out=$(xenv get production APP_ENV)
+  assert_eq "changed" "$out" "edit changes value"
+}
+
+test_edit_no_changes_skipped() {
+  xenv init >/dev/null 2>&1
+  before=$(stat -c %Y xenv/envs/production/APP_ENV.value.enc 2>/dev/null \
+           || stat -f %m xenv/envs/production/APP_ENV.value.enc 2>/dev/null)
+  cat > "$TMP/noop.sh" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+  chmod +x "$TMP/noop.sh"
+  EDITOR="$TMP/noop.sh" xenv edit production APP_ENV >/dev/null 2>&1
+  after=$(stat -c %Y xenv/envs/production/APP_ENV.value.enc 2>/dev/null \
+          || stat -f %m xenv/envs/production/APP_ENV.value.enc 2>/dev/null)
+  assert_eq "$before" "$after" "no-op edit doesn't touch file"
+}
+
+test_edit_creates_new_key() {
+  xenv init >/dev/null 2>&1
+  cat > "$TMP/ed.sh" <<'EOF'
+#!/bin/sh
+printf 'created' > "$1"
+EOF
+  chmod +x "$TMP/ed.sh"
+  EDITOR="$TMP/ed.sh" xenv edit production NEWKEY >/dev/null 2>&1
+  out=$(xenv get production NEWKEY)
+  assert_eq "created" "$out" "edit creates new key"
+}
+
+# ── rotate ─────────────────────────────────────────────────────────
+
+test_rotate_changes_key_preserves_values() {
+  xenv init >/dev/null 2>&1
+  xenv set production DB=db1 >/dev/null 2>&1
+  xenv set production API=api1 >/dev/null 2>&1
+  printf 'multi\nline' | xenv set production PEM >/dev/null 2>&1
+
+  kdir=$(project_keys_dir)
+  old_key=$(cat "$kdir/production")
+  xenv rotate production >/dev/null 2>&1
+  new_key=$(cat "$kdir/production")
+
+  [ "$old_key" != "$new_key" ] || return 1
+  [ "$(xenv get production APP_ENV)" = "production" ] || return 1
+  [ "$(xenv get production DB)"  = "db1" ]  || return 1
+  [ "$(xenv get production API)" = "api1" ] || return 1
+  multi_check=$(printf 'multi\nline')
+  [ "$(xenv get production PEM)" = "$multi_check" ] || return 1
+}
+
+# ── crypto integrity ──────────────────────────────────────────────
+
+test_wrong_key_fails_mac() {
+  xenv init >/dev/null 2>&1
+  echo "wrongkeywrongkeywrongkeywrongkey=" > "$(project_keys_dir)/production"
+  out=$(xenv get production APP_ENV 2>&1) && return 1
+  echo "$out" | grep -qi "MAC verification\|wrong key" || return 1
+}
+
+test_env_var_beats_file_backend() {
+  xenv init >/dev/null 2>&1
+  XENV_KEY_PRODUCTION="wrongkey" xenv get production APP_ENV >/dev/null 2>&1 && return 1
+  return 0
+}
+
+test_tampered_ciphertext_rejected() {
+  xenv init >/dev/null 2>&1
+  orig=$(cat xenv/envs/production/APP_ENV.value.enc)
+  IFS=: read -r tag ver iv ct mac <<EOF
+$orig
+EOF
+  first=$(printf '%s' "$ct" | cut -c1)
+  rest=$(printf '%s' "$ct" | cut -c2-)
+  if [ "$first" = "f" ]; then mut="0$rest"; else mut="f$rest"; fi
+  printf 'xenv:v3:%s:%s:%s\n' "$iv" "$mut" "$mac" > xenv/envs/production/APP_ENV.value.enc
+
+  out=$(xenv get production APP_ENV 2>&1) && return 1
+  echo "$out" | grep -qi "MAC verification" || return 1
+}
+
+test_envelope_short_iv_rejected() {
+  xenv init >/dev/null 2>&1
+  printf 'xenv:v3:deadbeef:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n' \
+    > xenv/envs/production/BAD.value.enc
+  out=$(xenv get production BAD 2>&1) && return 1
+  echo "$out" | grep -qi "invalid iv length" || return 1
+}
+
+test_envelope_bad_hex_rejected() {
+  xenv init >/dev/null 2>&1
+  printf 'xenv:v3:ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n' \
+    > xenv/envs/production/BAD.value.enc
+  out=$(xenv get production BAD 2>&1) && return 1
+  echo "$out" | grep -qi "non-hex" || return 1
+}
+
+test_envelope_extra_fields_rejected() {
+  xenv init >/dev/null 2>&1
+  printf 'xenv:v3:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff:extra\n' \
+    > xenv/envs/production/BAD.value.enc
+  out=$(xenv get production BAD 2>&1) && return 1
+  echo "$out" | grep -qi "extra fields" || return 1
+}
+
+test_unsupported_version_rejected() {
+  xenv init >/dev/null 2>&1
+  printf 'xenv:v99:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n' \
+    > xenv/envs/production/BAD.value.enc
+  out=$(xenv get production BAD 2>&1) && return 1
+  echo "$out" | grep -qi "unsupported vault version" || return 1
+}
+
+# ── concurrency + atomicity ───────────────────────────────────────
+
+test_concurrent_writes_to_different_keys() {
+  xenv init >/dev/null 2>&1
+  for i in 1 2 3 4 5; do
+    ( xenv set production "KEY_$i=value_$i" >/dev/null 2>&1 ) &
+  done
+  wait
+  for i in 1 2 3 4 5; do
+    val=$(xenv get production "KEY_$i" 2>/dev/null)
+    [ "$val" = "value_$i" ] || return 1
+  done
+  return 0
+}
+
+test_concurrent_writes_to_same_key() {
+  xenv init >/dev/null 2>&1
+  for i in 1 2 3 4 5; do
+    ( xenv set production "RACE=value_$i" >/dev/null 2>&1 ) &
+  done
+  wait
+  val=$(xenv get production RACE 2>/dev/null) || return 1
+  case "$val" in
+    value_1|value_2|value_3|value_4|value_5) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+test_partial_encrypt_failure_preserves() {
+  xenv init >/dev/null 2>&1
+  orig=$(cat xenv/envs/production/APP_ENV.value.enc)
+
+  mkdir "$TMP/badbin"
+  cat > "$TMP/badbin/openssl" <<EOF
+#!/bin/sh
+if [ "\${1:-}" = "enc" ]; then
+  case "\$*" in *-d*) exec /usr/bin/openssl "\$@" ;; esac
+  exit 1
+fi
+exec /usr/bin/openssl "\$@"
+EOF
+  chmod +x "$TMP/badbin/openssl"
+  PATH="$TMP/badbin:$PATH" xenv set production APP_ENV=newvalue >/dev/null 2>&1
+
+  now=$(cat xenv/envs/production/APP_ENV.value.enc)
+  assert_eq "$orig" "$now" "encrypt failure preserves original"
+}
+
+# ── per-key file structure (the defining properties) ──────────────
+
+test_each_value_is_own_file() {
+  xenv init >/dev/null 2>&1
+  xenv set production ALPHA=1 >/dev/null 2>&1
+  xenv set production BETA=2 >/dev/null 2>&1
+  xenv set production GAMMA=3 >/dev/null 2>&1
+  # APP_ENV + 3 new = 4
+  count=$(ls xenv/envs/production/*.value.enc 2>/dev/null | wc -l)
+  assert_eq "4" "$count" "four values, four files"
+}
+
+test_files_use_value_enc_extension() {
+  xenv init >/dev/null 2>&1
+  xenv set production DATABASE_URL=x >/dev/null 2>&1
+  [ -f xenv/envs/production/DATABASE_URL.value.enc ] || return 1
+  # explicitly NOT the old .enc extension
+  [ -f xenv/envs/production/DATABASE_URL.enc ] && return 1
+  return 0
+}
+
+test_params_file_named_params_xenv() {
+  xenv init >/dev/null 2>&1
+  [ -f xenv/envs/production/params.xenv ] || return 1
+  # explicitly NOT hidden
+  [ -f xenv/envs/production/.params ] && return 1
+  return 0
+}
+
+test_empty_value() {
+  xenv init >/dev/null 2>&1
+  xenv set production EMPTY= >/dev/null 2>&1
+  out=$(xenv get production EMPTY)
+  assert_eq "" "$out" "empty value round-trips"
+}
+
+test_set_after_unset() {
+  xenv init >/dev/null 2>&1
+  xenv set production FOO=v1 >/dev/null 2>&1
+  xenv unset production FOO >/dev/null 2>&1
+  xenv set production FOO=v2 >/dev/null 2>&1
+  out=$(xenv get production FOO)
+  assert_eq "v2" "$out" "set after unset"
+}
+
+# ── main ───────────────────────────────────────────────────────────
+
+printf 'xenv test suite (shell: %s)\n\n' "$SHELL_BIN"
+
+run_test "version"                                  test_version
+
+# init structure
+run_test "init creates xenv/"                       test_init_creates_xenv_dir
+run_test "init creates top README"                  test_init_creates_top_readme
+run_test "init creates xenv/bin/xenv"               test_init_creates_bin_xenv
+run_test "init creates four envs"                   test_init_creates_four_envs
+run_test "init stores passphrase per env"           test_init_stores_passphrase_per_env
+run_test "init APP_ENV decrypts to env name"        test_init_app_env_decrypts_to_env_name
+run_test "init per-env README mentions env name"    test_init_per_env_readme_mentions_env_name
+run_test "init refuses to re-init"                  test_init_refuses_to_reinit
+
+# project id
+run_test "init creates xenv/project.xenv"           test_init_creates_project_xenv
+run_test "init creates per-project config dir"      test_init_creates_per_project_config_dir
+run_test "init origin file records xenv/ path"      test_init_origin_file_records_xenv_path
+run_test "init notes stub mentions project id"      test_init_notes_stub_mentions_project_id
+run_test "two same-basename projects → unique ids"  test_two_projects_same_basename_get_unique_ids
+run_test "weird basename gets sanitized"            test_basename_sanitization
+run_test "no project.xenv → key lookup fails"       test_no_project_xenv_means_no_key_lookup
+run_test "init params file format"                  test_init_params_file_format
+run_test "init value files are v3 envelopes"        test_init_value_files_are_v3_envelopes
+run_test "init bin/xenv is self-contained"          test_init_bin_xenv_is_self_contained
+
+# set / get / list / unset
+run_test "set creates one value file"               test_set_creates_one_value_file
+run_test "set inline round-trip"                    test_set_inline_round_trip
+run_test "set value with = signs"                   test_set_value_with_equals_signs
+run_test "set value with quotes — no RCE"           test_set_value_with_quotes_no_rce
+run_test "set from stdin (multi-line)"              test_set_from_stdin_multiline
+run_test "set PEM key (multi-line)"                 test_set_pem_key
+run_test "unset removes file"                       test_unset_removes_file
+run_test "list shows starter APP_ENV"               test_list_shows_starter_app_env
+run_test "list shows new keys"                      test_list_shows_new_keys
+run_test "get silent on success"                    test_get_silent_on_success
+run_test "get missing key fails"                    test_get_missing_key_fails
+
+# envs
+run_test "envs lists all four"                      test_envs_lists_all_four
+run_test "envs only iterates xenv/envs/"            test_envs_only_iterates_envs_dir
+
+# run
+run_test "run injects env"                          test_run_injects_env
+run_test "run preserves multi-line"                 test_run_preserves_multiline
+run_test "run propagates exit code"                 test_run_propagates_exit_code
+run_test "run no command fails"                     test_run_no_command_fails
+run_test "run no env fails"                         test_run_no_env_fails
+run_test "xenv -- shorthand"                        test_run_dash_shorthand
+
+# edit
+run_test "edit round-trip"                          test_edit_round_trip
+run_test "edit no changes skipped"                  test_edit_no_changes_skipped
+run_test "edit creates new key"                     test_edit_creates_new_key
+
+# rotate
+run_test "rotate changes key preserves values"      test_rotate_changes_key_preserves_values
+
+# crypto
+run_test "wrong key fails MAC"                      test_wrong_key_fails_mac
+run_test "env var beats file backend"               test_env_var_beats_file_backend
+run_test "tampered ciphertext rejected"             test_tampered_ciphertext_rejected
+run_test "envelope short iv rejected"               test_envelope_short_iv_rejected
+run_test "envelope bad hex rejected"                test_envelope_bad_hex_rejected
+run_test "envelope extra fields rejected"           test_envelope_extra_fields_rejected
+run_test "unsupported version rejected"             test_unsupported_version_rejected
+
+# concurrency / atomicity
+run_test "concurrent writes — different keys"       test_concurrent_writes_to_different_keys
+run_test "concurrent writes — same key"             test_concurrent_writes_to_same_key
+run_test "partial encrypt failure preserves"        test_partial_encrypt_failure_preserves
+
+# structure
+run_test "each value is own file"                   test_each_value_is_own_file
+run_test "files use .value.enc extension"           test_files_use_value_enc_extension
+run_test "params file named params.xenv"            test_params_file_named_params_xenv
+run_test "empty value round-trips"                  test_empty_value
+run_test "set after unset"                          test_set_after_unset
+
+printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
+if [ "$FAIL" -gt 0 ]; then
+  printf 'failed:%b\n' "$FAILED_TESTS"
+  exit 1
+fi
+exit 0

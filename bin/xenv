@@ -1,0 +1,892 @@
+#!/bin/sh
+# xenv — per-key encrypted environment store
+#
+# Project layout:
+#
+#   xenv/
+#     README.md                    — docs for humans AND agents
+#     bin/
+#       xenv                       — self-contained copy of this script
+#     production/
+#       README.md                  — per-env doc: vars, how to obtain
+#       params.xenv                — public KDF params (committed, not secret)
+#       APP_ENV.value.enc          — encrypted variable (committed, encrypted)
+#       DATABASE_URL.value.enc
+#       ...
+#     staging/
+#       ...
+#     development/
+#     testing/
+#
+# Every file under xenv/ is SAFE TO COMMIT by design. The whole `xenv/`
+# directory is the project's environment store — code, config, and data
+# in one place. `rm -rf xenv/` ejects the tool cleanly.
+#
+# Threat model: dev tool for one human or a small trusted team. Protects
+# against accidental plaintext commits and lost laptops. Does NOT protect
+# against an attacker running commands as the same user — they've already won.
+#
+# Dependencies: sh, openssl (3.0+ for kdf), awk, mktemp, od.
+
+set -u
+LC_ALL=C
+export LC_ALL
+
+XENV_VERSION="0.5.0-posix"
+XENV_DIR="xenv"
+XENV_VAULT_VERSION="v3"
+XENV_PROJECT_VERSION="v1"
+XENV_ITER=200000
+XENV_SALT_BYTES=16
+XENV_IV_BYTES=16
+XENV_KEY_BYTES=32
+XENV_MAC_BYTES=32
+XENV_VALUE_EXT=".value.enc"
+XENV_PARAMS_FILE="params.xenv"
+XENV_PROJECT_FILE="project.xenv"
+XENV_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/xenv"
+XENV_PROJECTS_DIR="$XENV_CONFIG/projects"
+
+XENV_DEFAULT_ENVS="testing development staging production"
+
+# ── output ────────────────────────────────────────────────────────
+
+err()  { printf 'xenv: %s\n' "$*" >&2; }
+die()  { err "$*"; exit 1; }
+info() { printf 'xenv: %s\n' "$*" >&2; }
+
+# ── hex helpers (POSIX awk, no xxd) ───────────────────────────────
+
+hex_encode() {
+  od -An -vtx1 | tr -d '[:space:]'
+}
+
+hex_decode() {
+  awk '
+    BEGIN {
+      for (i = 0; i < 16; i++) {
+        c = sprintf("%x", i); v[c] = i; v[toupper(c)] = i
+      }
+    }
+    {
+      for (i = 1; i <= length($0); i += 2) {
+        printf "%c", v[substr($0,i,1)] * 16 + v[substr($0,i+1,1)]
+      }
+    }
+  '
+}
+
+# ── project id ────────────────────────────────────────────────────
+#
+# Every initialized project gets a unique id, stored in
+# xenv/project.xenv as a single line:
+#
+#   v1:<sanitized-basename>--<32-hex-uuid>
+#
+# The id is human-readable (so you can `ls ~/.config/xenv/projects/`
+# and recognize what's what) but disambiguated by 128 bits of
+# randomness (so two projects with the same basename never collide).
+#
+# Per-project state lives in:
+#
+#   ~/.config/xenv/projects/<id>/
+#     keys/<env>     ← passphrases, mode 600 (never committed)
+#     origin        ← absolute path of xenv/ at last init (informational)
+#     notes.md     ← user's per-project notebook (survives the project)
+#
+# The project.xenv file itself IS safe to commit — it carries no secrets,
+# just the identifier that binds a checkout to a local keys directory.
+# Teammates cloning the same repo share the project id and each set up
+# their own local passphrase under their own ~/.config/xenv/projects/<id>/.
+
+# turn a project basename into something filesystem-friendly. lowercase,
+# replace any non-[A-Za-z0-9._-] with -, collapse runs of -, trim leading/
+# trailing -. Empty result becomes "project".
+sanitize_basename() {
+  printf '%s' "$1" | awk '
+    {
+      out = tolower($0)
+      n = ""
+      prev = ""
+      for (i = 1; i <= length(out); i++) {
+        c = substr(out, i, 1)
+        if (c ~ /[A-Za-z0-9._-]/) {
+          n = n c
+          prev = c
+        } else if (prev != "-") {
+          n = n "-"
+          prev = "-"
+        }
+      }
+      # trim leading and trailing -
+      sub(/^-+/, "", n)
+      sub(/-+$/, "", n)
+      if (n == "") n = "project"
+      print n
+    }
+  '
+}
+
+# generate a new project id from the current cwd's basename + 32 hex random
+new_project_id() {
+  base=$(sanitize_basename "$(basename "$(pwd)")")
+  uuid=$(openssl rand -hex 16)
+  printf '%s--%s' "$base" "$uuid"
+}
+
+# read the project id from xenv/project.xenv. errors if missing or malformed.
+read_project_id() {
+  pf="$XENV_DIR/$XENV_PROJECT_FILE"
+  [ -f "$pf" ] || { err "no $pf — run 'xenv init'"; return 1; }
+
+  IFS=: read -r ver id < "$pf"
+  [ "$ver" = "$XENV_PROJECT_VERSION" ] \
+    || { err "project.xenv: unsupported version $ver"; return 1; }
+  [ -n "$id" ] || { err "project.xenv: empty id"; return 1; }
+  # sanity: id should be sanitized-basename--32hex.
+  case "$id" in
+    *--*) ;;
+    *) err "project.xenv: malformed id"; return 1 ;;
+  esac
+  printf '%s' "$id"
+}
+
+# return ~/.config/xenv/projects/<id>/ for the current project.
+project_dir() {
+  id=$(read_project_id) || return 1
+  printf '%s/%s' "$XENV_PROJECTS_DIR" "$id"
+}
+
+# initialize the per-project config dir: keys/, origin, notes.md
+init_project_dir() {
+  id=$1
+  origin=$2
+  pdir="$XENV_PROJECTS_DIR/$id"
+
+  mkdir -p "$pdir/keys"
+  chmod 700 "$XENV_CONFIG" "$XENV_PROJECTS_DIR" "$pdir" "$pdir/keys" 2>/dev/null || true
+
+  umask 077
+  printf '%s\n' "$origin" > "$pdir/origin"
+  chmod 600 "$pdir/origin"
+
+  # notes.md is the user's per-project notebook. starts as a stub.
+  basename_part=${id%%--*}
+  cat > "$pdir/notes.md" <<EOF
+# $basename_part
+
+Notes for the xenv keys for this project.
+
+- Origin: $origin
+- Project ID: $id
+- Initialized: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+## ops notes
+
+Write anything useful here. Examples:
+
+- Who else has access to these secrets?
+- Where do the production values come from?
+- Last rotated when?
+- Recovery procedure if the keychain is wiped?
+EOF
+  chmod 600 "$pdir/notes.md"
+}
+
+# ── crypto ────────────────────────────────────────────────────────
+#
+# Per-env KDF parameters live in xenv/<env>/params.xenv:
+#   v3:<iter>:<salt-hex>
+#
+# Per-value envelope (one line in each KEY.value.enc):
+#   xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>
+#
+# MAC is HMAC-SHA256 over "v3:<iv-hex>:<ct-hex>" using a separate derived key.
+# Version is part of the MAC, so future v4 envelopes can't be confused with v3.
+
+derive_keys() {
+  passphrase=$1
+  salt_hex=$2
+  iter=$3
+  total=$((XENV_KEY_BYTES + XENV_MAC_BYTES))
+
+  derived=$(
+    openssl kdf -keylen "$total" -kdfopt digest:SHA256 \
+      -kdfopt "pass:$passphrase" -kdfopt "hexsalt:$salt_hex" \
+      -kdfopt "iter:$iter" -binary PBKDF2 2>/dev/null \
+      | hex_encode
+  )
+  [ -n "$derived" ] || { err "key derivation failed (need openssl 3.0+)"; return 1; }
+
+  printf '%s' "$derived" | awk -v n=$((XENV_KEY_BYTES * 2)) \
+    '{ printf "%s %s\n", substr($0,1,n), substr($0,n+1) }'
+}
+
+encrypt_value() {
+  enc_key_hex=$1
+  mac_key_hex=$2
+  iv_hex=$(openssl rand -hex "$XENV_IV_BYTES")
+
+  ct_hex=$(openssl enc -aes-256-cbc -K "$enc_key_hex" -iv "$iv_hex" 2>/dev/null | hex_encode)
+  [ -n "$ct_hex" ] || { err "encryption failed"; return 1; }
+
+  mac_input="${XENV_VAULT_VERSION}:${iv_hex}:${ct_hex}"
+  mac_hex=$(printf '%s' "$mac_input" \
+    | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$mac_key_hex" -binary 2>/dev/null \
+    | hex_encode)
+  [ -n "$mac_hex" ] || { err "MAC computation failed"; return 1; }
+
+  printf 'xenv:%s:%s:%s:%s\n' "$XENV_VAULT_VERSION" "$iv_hex" "$ct_hex" "$mac_hex"
+}
+
+decrypt_value() {
+  enc_key_hex=$1
+  mac_key_hex=$2
+  envelope=$(cat)
+
+  IFS=: read -r tag ver iv_hex ct_hex mac_hex extra <<EOF
+$envelope
+EOF
+
+  [ "$tag" = "xenv" ]                   || { err "not an xenv envelope"; return 1; }
+  [ "$ver" = "$XENV_VAULT_VERSION" ]    || { err "unsupported vault version: $ver"; return 1; }
+  [ -z "$extra" ]                       || { err "envelope has extra fields"; return 1; }
+  [ "${#iv_hex}" -eq 32 ]               || { err "invalid iv length"; return 1; }
+  [ "${#mac_hex}" -eq 64 ]              || { err "invalid mac length"; return 1; }
+  [ "${#ct_hex}" -gt 0 ] && [ $((${#ct_hex} % 32)) -eq 0 ] \
+                                        || { err "invalid ciphertext length"; return 1; }
+  case "$iv_hex$ct_hex$mac_hex" in
+    *[!0-9a-f]*) err "envelope contains non-hex"; return 1 ;;
+  esac
+
+  mac_input="${ver}:${iv_hex}:${ct_hex}"
+  expected=$(printf '%s' "$mac_input" \
+    | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$mac_key_hex" -binary 2>/dev/null \
+    | hex_encode)
+
+  [ "$mac_hex" = "$expected" ] || { err "MAC verification failed — wrong key or tampered vault"; return 1; }
+
+  printf '%s' "$ct_hex" | hex_decode \
+    | openssl enc -d -aes-256-cbc -K "$enc_key_hex" -iv "$iv_hex" 2>/dev/null
+}
+
+# ── per-env directory + params ────────────────────────────────────
+
+env_dir()     { printf '%s/envs/%s' "$XENV_DIR" "$1"; }
+value_file()  { printf '%s/envs/%s/%s%s' "$XENV_DIR" "$1" "$2" "$XENV_VALUE_EXT"; }
+params_file() { printf '%s/envs/%s/%s' "$XENV_DIR" "$1" "$XENV_PARAMS_FILE"; }
+
+read_params() {
+  env_name=$1
+  pf=$(params_file "$env_name")
+  [ -f "$pf" ] || { err "no params for '$env_name' — run 'xenv keygen $env_name' first"; return 1; }
+
+  IFS=: read -r ver iter salt_hex < "$pf"
+  [ "$ver" = "$XENV_VAULT_VERSION" ] || { err "params: unsupported version $ver"; return 1; }
+  [ "${#salt_hex}" -eq 32 ]          || { err "params: invalid salt length"; return 1; }
+  case "$salt_hex" in
+    *[!0-9a-f]*) err "params: non-hex salt"; return 1 ;;
+  esac
+  case "$iter" in
+    ""|*[!0-9]*) err "params: invalid iter"; return 1 ;;
+  esac
+
+  printf '%s %s\n' "$iter" "$salt_hex"
+}
+
+# initialize a new env dir with params.xenv (random salt). must not exist yet.
+init_env_dir() {
+  env_name=$1
+  dir=$(env_dir "$env_name")
+  [ -d "$dir" ] && die "env '$env_name' already exists at $dir"
+
+  mkdir -p "$dir"
+  chmod 700 "$dir" 2>/dev/null || true
+
+  salt_hex=$(openssl rand -hex "$XENV_SALT_BYTES")
+  umask 077
+  printf '%s:%s:%s\n' "$XENV_VAULT_VERSION" "$XENV_ITER" "$salt_hex" \
+    > "$(params_file "$env_name")"
+  chmod 600 "$(params_file "$env_name")"
+}
+
+# ── passphrase resolution ─────────────────────────────────────────
+
+env_var_name() {
+  printf 'XENV_KEY_%s' "$(printf '%s' "$1" | tr '[:lower:]-' '[:upper:]_')"
+}
+
+lookup_key() {
+  env_name=$1
+  vname=$(env_var_name "$env_name")
+  eval "val=\${$vname:-}"
+  [ -n "$val" ] && { printf '%s' "$val"; return 0; }
+  [ -n "${XENV_KEY:-}" ] && { printf '%s' "$XENV_KEY"; return 0; }
+
+  # all subsequent backends are scoped by the project id, so two projects
+  # with envs of the same name never share keys.
+  id=$(read_project_id 2>/dev/null) || return 1
+
+  f="$XENV_PROJECTS_DIR/$id/keys/$env_name"
+  [ -r "$f" ] && { cat "$f"; return 0; }
+
+  if command -v security >/dev/null 2>&1; then
+    val=$(security find-generic-password -s xenv -a "$id/$env_name" -w 2>/dev/null) || true
+    [ -n "$val" ] && { printf '%s\n' "$val"; return 0; }
+  fi
+
+  if command -v pass >/dev/null 2>&1; then
+    val=$(pass show "xenv/$id/$env_name" 2>/dev/null) || true
+    [ -n "$val" ] && { printf '%s\n' "$val"; return 0; }
+  fi
+
+  return 1
+}
+
+require_key() {
+  env_name=$1
+  key=$(lookup_key "$env_name") || {
+    vname=$(env_var_name "$env_name")
+    id=$(read_project_id 2>/dev/null || printf '(no project)')
+    err "no key for '$env_name' (project: $id)"
+    err "tried: \$$vname, \$XENV_KEY, $XENV_PROJECTS_DIR/$id/keys/$env_name, keychain, pass"
+    err "run 'xenv keygen $env_name' to generate one"
+    return 1
+  }
+  printf '%s' "$key"
+}
+
+store_key() {
+  env_name=$1
+  key=$2
+  backend=${3:-auto}
+  case "$backend" in
+    --keychain) backend=keychain ;;
+    --pass)     backend=pass ;;
+    --file)     backend=file ;;
+  esac
+
+  # all backends are scoped by project id
+  id=$(read_project_id) || die "cannot store key without a project id"
+
+  case "$backend" in
+    keychain)
+      command -v security >/dev/null 2>&1 || die "macOS keychain unavailable"
+      security add-generic-password -s xenv -a "$id/$env_name" -w "$key" -U 2>/dev/null
+      info "key stored in macOS keychain (service=xenv, account=$id/$env_name)"
+      ;;
+    pass)
+      command -v pass >/dev/null 2>&1 || die "pass unavailable"
+      printf '%s\n' "$key" | pass insert -e "xenv/$id/$env_name" >/dev/null
+      info "key stored in pass (xenv/$id/$env_name)"
+      ;;
+    file|auto)
+      pdir="$XENV_PROJECTS_DIR/$id"
+      mkdir -p "$pdir/keys"
+      chmod 700 "$XENV_CONFIG" "$XENV_PROJECTS_DIR" "$pdir" "$pdir/keys" 2>/dev/null || true
+      umask 077
+      printf '%s\n' "$key" > "$pdir/keys/$env_name"
+      chmod 600 "$pdir/keys/$env_name"
+      info "key stored at $pdir/keys/$env_name (mode 600)"
+      ;;
+    *) die "unknown backend: $backend" ;;
+  esac
+}
+
+# ── derive helpers for commands ───────────────────────────────────
+
+keys_for_env() {
+  env_name=$1
+  passphrase=$(require_key "$env_name") || return 1
+  params=$(read_params "$env_name") || return 1
+  iter=${params%% *}
+  salt_hex=${params#* }
+  derive_keys "$passphrase" "$salt_hex" "$iter"
+}
+
+atomic_write() {
+  dest=$1
+  tmp="${dest}.tmp.$$"
+  umask 077
+  cat > "$tmp" || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$dest"
+}
+
+# encrypt a value and write it to xenv/<env>/KEY.value.enc atomically
+write_value() {
+  env_name=$1
+  name=$2
+  value=$3
+
+  read -r enc_key mac_key <<EOF
+$(keys_for_env "$env_name")
+EOF
+  [ -n "$enc_key" ] || return 1
+
+  envelope=$(printf '%s' "$value" | encrypt_value "$enc_key" "$mac_key") \
+    || { err "encryption failed — $name unchanged"; return 1; }
+  printf '%s\n' "$envelope" | atomic_write "$(value_file "$env_name" "$name")"
+}
+
+# ── README templates ─────────────────────────────────────────────
+
+# top-level xenv/README.md — addresses both humans and agents
+write_top_readme() {
+  cat > "$XENV_DIR/README.md" <<'EOF'
+# xenv/
+
+Encrypted environment variables for this project. Every file under
+this directory is **safe to commit by design**.
+
+## for humans
+
+```sh
+xenv list <env>                    # show variable names
+xenv get  <env> KEY                # decrypt one value (silent on success)
+xenv set  <env> KEY=value          # store a value
+xenv set  <env> KEY < file         # store a multi-line/binary value
+xenv edit <env> KEY                # decrypt → $EDITOR → re-encrypt
+xenv run  <env> CMD [args]         # run a command with the env injected
+```
+
+See `xenv help` for the full command list. Each env in `xenv/envs/`
+has its own `README.md` documenting the variables that env uses.
+
+## for agents
+
+Every file in `xenv/` is **safe to commit and safe to share**:
+
+- `*.value.enc` — AES-256-CBC encrypted, useless without the passphrase
+- `params.xenv` — public salt + iteration count, never secret
+- `README.md` — plain documentation, no secrets
+
+The **passphrase** is what you must never commit. It lives outside the
+repo in one of (first hit wins):
+
+  1. `$XENV_KEY_<ENV>` — environment variable
+  2. `$XENV_KEY` — global env var
+  3. `~/.config/xenv/projects/<project-id>/keys/<env>` — file, mode 600
+  4. macOS keychain (account `<project-id>/<env>`, service `xenv`)
+  5. `pass show xenv/<project-id>/<env>`
+
+The project-id lives in `xenv/project.xenv` and binds this checkout
+to a local keys directory. It is safe to commit.
+
+To add a new value:
+
+    xenv set <env> KEY=value
+
+To read one (script-safe, silent on success):
+
+    xenv get <env> KEY
+
+To run a command with all the env's vars injected:
+
+    xenv run <env> ./your-command
+
+**Never** decrypt to a plaintext file you might `git add`. There's
+no need — use `xenv get` (in-memory) or `xenv run` (exec-time).
+
+## structure
+
+    xenv/
+      README.md              ← this file
+      bin/
+        xenv                 ← self-contained copy of the script
+      envs/
+        production/
+          README.md          ← what variables this env uses
+          params.xenv        ← public KDF params (committed)
+          APP_ENV.value.enc  ← one encrypted variable
+          ...
+        staging/      ...
+        development/  ...
+        testing/      ...
+EOF
+}
+
+# per-env README.md — env.sample-style doc, project-specific over time
+write_env_readme() {
+  env_name=$1
+  cat > "$(env_dir "$env_name")/README.md" <<EOF
+# xenv/$env_name
+
+Encrypted environment variables for **$env_name**.
+
+## variables
+
+Document each variable here. Replace this section as the project evolves.
+
+| variable | description | how to obtain |
+|---|---|---|
+| APP_ENV | environment name (always \`$env_name\`) | — |
+
+## commands
+
+    xenv list $env_name                       # show what's defined
+    xenv set  $env_name DATABASE_URL=...      # add or replace
+    xenv get  $env_name DATABASE_URL          # read one value
+    xenv run  $env_name ./server              # run with env injected
+
+## passphrase
+
+Stored locally under \`~/.config/xenv/projects/<id>/keys/$env_name\` (mode 600), or in
+the macOS keychain / \`pass\`, or as the \`$(env_var_name "$env_name")\`
+environment variable. The passphrase is **not** in this directory and
+must never be committed.
+
+For CI, set \`$(env_var_name "$env_name")\` as a secret in the
+platform's secret store.
+EOF
+}
+
+# ── commands ──────────────────────────────────────────────────────
+
+cmd_help() {
+  cat <<'USAGE'
+xenv — per-key encrypted environment store
+
+usage:
+  xenv init                          create xenv/ with 4 default envs
+  xenv envs                          list environments
+  xenv keygen <env> [--keychain|--pass|--file]
+                                     create env dir + passphrase
+  xenv rotate <env>                  rotate passphrase, re-encrypt all keys
+
+  xenv set    <env> KEY=value        store a value
+  xenv set    <env> KEY              read value from stdin (multi-line OK)
+  xenv get    <env> KEY              decrypt one key (silent on success)
+  xenv unset  <env> KEY              delete a key
+  xenv list   <env>                  list key names (no decryption)
+  xenv edit   <env> KEY              decrypt → $VISUAL/$EDITOR → re-encrypt
+
+  xenv run    <env> CMD [args]       run command with all keys exported
+  xenv --     <env> CMD [args]       shorthand for run
+
+  xenv help / version
+
+each env is a directory: xenv/<env>/
+each variable is one file: xenv/<env>/KEY.value.enc
+each env has a public params.xenv (salt + iter, safe to commit)
+
+key lookup (first hit wins):
+  $XENV_KEY_<ENV> → $XENV_KEY → ~/.config/xenv/projects/<id>/keys/<env>
+  → macOS keychain (xenv/<env>) → pass (xenv/<env>)
+USAGE
+}
+
+cmd_version() { printf 'xenv %s\n' "$XENV_VERSION"; }
+
+cmd_init() {
+  [ -d "$XENV_DIR" ] && die "$XENV_DIR/ already exists — delete it to re-init"
+  [ -f "$XENV_DIR/$XENV_PROJECT_FILE" ] && die "$XENV_DIR/$XENV_PROJECT_FILE exists — delete it to re-init"
+
+  mkdir -p "$XENV_DIR/bin" "$XENV_DIR/envs"
+
+  # write project.xenv first — everything downstream (store_key, etc) needs it
+  project_id=$(new_project_id)
+  printf '%s:%s\n' "$XENV_PROJECT_VERSION" "$project_id" > "$XENV_DIR/$XENV_PROJECT_FILE"
+
+  # bootstrap the per-project config dir: keys/, origin, notes.md
+  origin=$(cd "$XENV_DIR" && pwd)
+  init_project_dir "$project_id" "$origin"
+
+  # copy ourselves into xenv/bin/xenv so the project is self-contained.
+  self=$0
+  case "$self" in
+    /*) ;;
+    *)  self=$(command -v "$self" 2>/dev/null || printf '%s' "$self") ;;
+  esac
+  cp "$self" "$XENV_DIR/bin/xenv" 2>/dev/null \
+    || die "could not copy $self → $XENV_DIR/bin/xenv"
+  chmod +x "$XENV_DIR/bin/xenv"
+
+  # set up each default env: dir + params + passphrase + APP_ENV + README
+  for env_name in $XENV_DEFAULT_ENVS; do
+    init_env_dir "$env_name"
+
+    key=$(openssl rand -base64 32 | tr -d '\n')
+    store_key "$env_name" "$key" file >/dev/null 2>&1
+
+    write_value "$env_name" "APP_ENV" "$env_name" \
+      || die "could not write APP_ENV for $env_name"
+
+    write_env_readme "$env_name"
+  done
+
+  write_top_readme
+
+  info "initialized $XENV_DIR/ with envs: $XENV_DEFAULT_ENVS"
+  info "project id: $project_id"
+  info "passphrases live in $XENV_PROJECTS_DIR/$project_id/keys/"
+  info "your notes: $XENV_PROJECTS_DIR/$project_id/notes.md"
+  info "each env starts with APP_ENV — try: xenv get development APP_ENV"
+}
+
+cmd_envs() {
+  [ -d "$XENV_DIR/envs" ] || { info "no $XENV_DIR/ — run 'xenv init'"; return 0; }
+  found=0
+  for d in "$XENV_DIR"/envs/*/; do
+    [ -d "$d" ] || continue
+    name=${d%/}; name=${name##*/}
+    found=1
+    if lookup_key "$name" >/dev/null 2>&1; then
+      printf '  %s\n' "$name"
+    else
+      printf '  %s  (no key)\n' "$name"
+    fi
+  done
+  if [ $found -eq 0 ]; then
+    info "no environments yet — run 'xenv keygen <env>'"
+  fi
+}
+
+cmd_keygen() {
+  env_name=$1
+  backend=${2:-auto}
+
+  if [ -d "$(env_dir "$env_name")" ]; then
+    die "env '$env_name' already exists — use 'xenv rotate $env_name' to change keys"
+  fi
+
+  init_env_dir "$env_name"
+  key=$(openssl rand -base64 32 | tr -d '\n')
+  store_key "$env_name" "$key" "$backend"
+  write_env_readme "$env_name"
+
+  printf '\nfor CI, set this secret:\n  %s=%s\n' "$(env_var_name "$env_name")" "$key" >&2
+}
+
+cmd_rotate() {
+  env_name=$1
+  dir=$(env_dir "$env_name")
+  [ -d "$dir" ] || die "no env '$env_name'"
+
+  old_pass=$(require_key "$env_name") || exit 1
+  old_params=$(read_params "$env_name") || exit 1
+  old_iter=${old_params%% *}
+  old_salt=${old_params#* }
+  read -r old_enc old_mac <<EOF
+$(derive_keys "$old_pass" "$old_salt" "$old_iter")
+EOF
+
+  new_pass=$(openssl rand -base64 32 | tr -d '\n')
+  new_salt=$(openssl rand -hex "$XENV_SALT_BYTES")
+  new_iter=$XENV_ITER
+  read -r new_enc new_mac <<EOF
+$(derive_keys "$new_pass" "$new_salt" "$new_iter")
+EOF
+
+  # decrypt all to a stash first; only write new params + re-encrypt if every decrypt succeeded
+  tmp_stash=$(mktemp -d "${TMPDIR:-/tmp}/xenv-rotate.XXXXXXXX") || die "mktemp failed"
+  trap 'rm -rf "$tmp_stash"' EXIT INT TERM HUP
+
+  for f in "$dir"/*"$XENV_VALUE_EXT"; do
+    [ -f "$f" ] || continue
+    name=${f##*/}
+    plain=$(decrypt_value "$old_enc" "$old_mac" < "$f") || die "decrypt failed for $name"
+    printf '%s' "$plain" > "$tmp_stash/$name"
+  done
+
+  printf '%s:%s:%s\n' "$XENV_VAULT_VERSION" "$new_iter" "$new_salt" \
+    | atomic_write "$(params_file "$env_name")" || die "could not write new params"
+  chmod 600 "$(params_file "$env_name")"
+
+  for f in "$tmp_stash"/*; do
+    [ -f "$f" ] || continue
+    name=${f##*/}
+    envelope=$(encrypt_value "$new_enc" "$new_mac" < "$f") \
+      || die "re-encryption failed for $name"
+    printf '%s\n' "$envelope" | atomic_write "$dir/$name" \
+      || die "could not write $name"
+  done
+
+  rm -rf "$tmp_stash"
+  trap - EXIT INT TERM HUP
+
+  # detect which backend the old key lives in, so we update the same one
+  id=$(read_project_id) || die "no project id — cannot rotate"
+  backend=auto
+  [ -r "$XENV_PROJECTS_DIR/$id/keys/$env_name" ] && backend=file
+  command -v security >/dev/null 2>&1 && \
+    security find-generic-password -s xenv -a "$id/$env_name" >/dev/null 2>&1 && backend=keychain
+  command -v pass >/dev/null 2>&1 && \
+    pass show "xenv/$id/$env_name" >/dev/null 2>&1 && backend=pass
+
+  store_key "$env_name" "$new_pass" "$backend"
+  printf '\nrotated. new key:\n  %s=%s\n' "$(env_var_name "$env_name")" "$new_pass" >&2
+}
+
+cmd_set() {
+  env_name=$1
+  arg=$2
+  dir=$(env_dir "$env_name")
+  [ -d "$dir" ] || die "no env '$env_name' — run 'xenv keygen $env_name' first"
+
+  case "$arg" in
+    *=*)
+      name=${arg%%=*}
+      value=${arg#*=}
+      ;;
+    *)
+      name=$arg
+      value=$(cat)
+      ;;
+  esac
+
+  [ -n "$name" ] || die "key name is empty"
+
+  write_value "$env_name" "$name" "$value" || exit 1
+  info "set $name in $dir"
+}
+
+cmd_unset() {
+  env_name=$1
+  name=$2
+  f=$(value_file "$env_name" "$name")
+  [ -f "$f" ] || die "no such key: $name"
+  rm -f "$f"
+  info "unset $name"
+}
+
+cmd_list() {
+  env_name=$1
+  dir=$(env_dir "$env_name")
+  [ -d "$dir" ] || die "no env '$env_name'"
+
+  found=0
+  for f in "$dir"/*"$XENV_VALUE_EXT"; do
+    [ -f "$f" ] || continue
+    found=1
+    name=${f##*/}
+    printf '%s\n' "${name%"$XENV_VALUE_EXT"}"
+  done
+  [ $found -eq 0 ] && info "(no keys yet)"
+}
+
+cmd_get() {
+  env_name=$1
+  name=$2
+  f=$(value_file "$env_name" "$name")
+  [ -f "$f" ] || die "no such key: $name"
+
+  read -r enc_key mac_key <<EOF
+$(keys_for_env "$env_name")
+EOF
+  [ -n "$enc_key" ] || exit 1
+
+  decrypt_value "$enc_key" "$mac_key" < "$f" || die "decrypt failed"
+}
+
+cmd_edit() {
+  env_name=$1
+  name=$2
+  dir=$(env_dir "$env_name")
+  f=$(value_file "$env_name" "$name")
+  [ -d "$dir" ] || die "no env '$env_name'"
+
+  read -r enc_key mac_key <<EOF
+$(keys_for_env "$env_name")
+EOF
+  [ -n "$enc_key" ] || exit 1
+
+  umask 077
+  tmp=$(mktemp "${TMPDIR:-/tmp}/xenv-edit.XXXXXXXX") || die "mktemp failed"
+  trap 'rm -f "$tmp"' EXIT INT TERM HUP
+
+  if [ -f "$f" ]; then
+    decrypt_value "$enc_key" "$mac_key" < "$f" > "$tmp" || die "decrypt failed"
+  fi
+
+  editor=${VISUAL:-${EDITOR:-vi}}
+
+  before=$(openssl dgst -sha256 < "$tmp" | awk '{print $NF}')
+  "$editor" "$tmp"
+  after=$(openssl dgst -sha256 < "$tmp" | awk '{print $NF}')
+
+  if [ "$before" = "$after" ]; then
+    info "no changes — $name unchanged"
+    return 0
+  fi
+
+  envelope=$(encrypt_value "$enc_key" "$mac_key" < "$tmp") \
+    || die "encryption failed — $name unchanged"
+  printf '%s\n' "$envelope" | atomic_write "$f" \
+    || die "could not write $f"
+  info "encrypted → $f"
+}
+
+cmd_run() {
+  [ $# -ge 1 ] || die "run needs <env> <cmd> [args]"
+  env_name=$1
+  shift
+  [ $# -ge 1 ] || die "run needs a command — try 'xenv run $env_name <cmd>'"
+
+  dir=$(env_dir "$env_name")
+  [ -d "$dir" ] || die "no env '$env_name'"
+
+  read -r enc_key mac_key <<EOF
+$(keys_for_env "$env_name")
+EOF
+  [ -n "$enc_key" ] || exit 1
+
+  for f in "$dir"/*"$XENV_VALUE_EXT"; do
+    [ -f "$f" ] || continue
+    name=${f##*/}; name=${name%"$XENV_VALUE_EXT"}
+    value=$(decrypt_value "$enc_key" "$mac_key" < "$f") || die "decrypt failed for $name"
+    eval "$name=\$value"
+    export "$name"
+  done
+
+  exec "$@"
+}
+
+# ── dispatch ──────────────────────────────────────────────────────
+
+main() {
+  cmd=${1:-help}
+  case "$cmd" in
+    -h|--help|help)         cmd_help ;;
+    -v|--version|version)   cmd_version ;;
+    init)                   cmd_init ;;
+    envs)                   cmd_envs ;;
+    keygen)
+      shift; [ $# -ge 1 ] || die "keygen needs an env name"
+      cmd_keygen "$1" "${2:-auto}"
+      ;;
+    rotate)
+      shift; [ $# -ge 1 ] || die "rotate needs an env name"
+      cmd_rotate "$1"
+      ;;
+    set)
+      shift; [ $# -ge 2 ] || die "set needs <env> KEY=VALUE or <env> KEY (stdin)"
+      cmd_set "$1" "$2"
+      ;;
+    unset)
+      shift; [ $# -ge 2 ] || die "unset needs <env> KEY"
+      cmd_unset "$1" "$2"
+      ;;
+    list)
+      shift; [ $# -ge 1 ] || die "list needs an env name"
+      cmd_list "$1"
+      ;;
+    get)
+      shift; [ $# -ge 2 ] || die "get needs <env> KEY"
+      cmd_get "$1" "$2"
+      ;;
+    edit)
+      shift; [ $# -ge 2 ] || die "edit needs <env> KEY"
+      cmd_edit "$1" "$2"
+      ;;
+    run|--)
+      shift; cmd_run "$@"
+      ;;
+    *)
+      err "unknown command: $cmd"
+      err "try 'xenv help'"
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
