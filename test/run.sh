@@ -98,9 +98,10 @@ test_init_creates_four_envs() {
   [ -d xenv/envs ] || return 1
   for env_name in testing development staging production; do
     [ -d "xenv/envs/$env_name" ] || return 1
-    [ -f "xenv/envs/$env_name/params.xenv" ] || return 1
     [ -f "xenv/envs/$env_name/README.md" ] || return 1
     [ -f "xenv/envs/$env_name/APP_ENV.value.enc" ] || return 1
+    # KDF params live in the README's frontmatter now — no separate params file
+    [ ! -f "xenv/envs/$env_name/params.xenv" ] || return 1
   done
   return 0
 }
@@ -237,16 +238,22 @@ test_no_project_xenv_means_no_key_lookup() {
   return 0
 }
 
-test_init_params_file_format() {
+test_init_frontmatter_params() {
   xenv init >/dev/null 2>&1
-  # v3:<iter>:<32-hex-char-salt>
-  case "$(cat xenv/envs/production/params.xenv)" in
-    "v3:200000:"*) ;;
-    *) return 1 ;;
-  esac
-  # salt is 32 hex chars
-  salt=$(cut -d: -f3 xenv/envs/production/params.xenv)
-  [ ${#salt} -eq 32 ] || return 1
+  rf=xenv/envs/production/README.md
+  [ -f "$rf" ] || return 1
+
+  # README must start with the frontmatter fence
+  head -n 1 "$rf" | grep -qx -- '---' || return 1
+
+  # extract the params block — lines between the first two '---' fences
+  block=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{exit} p' "$rf")
+  echo "$block" | grep -q '^xenv_version: v3$'        || return 1
+  echo "$block" | grep -q '^xenv_iter: 200000$'       || return 1
+  echo "$block" | grep -qE '^xenv_salt: [0-9a-f]{32}$' || return 1
+
+  # body of the README must still be there
+  grep -q "xenv/production" "$rf" || return 1
 }
 
 test_init_value_files_are_v3_envelopes() {
@@ -613,12 +620,76 @@ test_files_use_value_enc_extension() {
   return 0
 }
 
-test_params_file_named_params_xenv() {
+test_no_separate_params_file() {
+  # KDF params used to live in params.xenv. Now they live in the
+  # README's YAML frontmatter — there should be no params file at all.
   xenv init >/dev/null 2>&1
-  [ -f xenv/envs/production/params.xenv ] || return 1
-  # explicitly NOT hidden
-  [ -f xenv/envs/production/.params ] && return 1
+  [ -f xenv/envs/production/params.xenv ] && return 1
+  [ -f xenv/envs/production/.params ]     && return 1
   return 0
+}
+
+test_frontmatter_has_do_not_edit_warning() {
+  # the frontmatter is one keystroke from breaking decryption. it must
+  # carry an unmissable warning so an agent reading it knows to leave it alone.
+  xenv init >/dev/null 2>&1
+  rf=xenv/envs/production/README.md
+  block=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{exit} p' "$rf")
+  echo "$block" | grep -qi "DO NOT EDIT" || return 1
+}
+
+test_rotate_preserves_readme_body() {
+  # rotation changes the salt+iter in the frontmatter but must not touch
+  # the body — user/agent prose edits survive a key rotation.
+  xenv init >/dev/null 2>&1
+  rf=xenv/envs/production/README.md
+
+  # mark the body with something an agent might have added
+  printf '\n## ops notes\n\nrotated 2026 — sentinel-xyz\n' >> "$rf"
+
+  # capture the body (everything after the frontmatter) before rotation
+  body_before=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{p=0;next} !p' "$rf")
+  salt_before=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{exit} p && /^xenv_salt:/{print $2}' "$rf")
+
+  xenv rotate production >/dev/null 2>&1 || return 1
+
+  body_after=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{p=0;next} !p' "$rf")
+  salt_after=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{exit} p && /^xenv_salt:/{print $2}' "$rf")
+
+  # body identical, salt changed
+  [ "$body_before" = "$body_after" ] || return 1
+  [ "$salt_before" != "$salt_after" ] || return 1
+
+  # and the user's sentinel survived
+  grep -q "sentinel-xyz" "$rf" || return 1
+}
+
+test_frontmatter_parser_naive_split_on_first_colon() {
+  # the parser splits on the FIRST colon. "key: a:b:c" should yield value "a:b:c".
+  # we verify this by hand-crafting a README, then exercising decrypt — which
+  # only works if read_params got the right salt out.
+  xenv init >/dev/null 2>&1
+  rf=xenv/envs/production/README.md
+
+  # the existing salt is what works. read it, then rewrite the frontmatter
+  # with a value that contains internal colons in a comment to prove the
+  # parser isn't confused. (we can't put colons in salt — it's hex.)
+  salt=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{exit} p && /^xenv_salt:/{print $2}' "$rf")
+  body=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{p=0;next} !p' "$rf")
+
+  cat > "$rf" <<EOF
+---
+# stress: nothing here:should:confuse:the:parser
+xenv_version: v3
+xenv_iter: 200000
+xenv_salt: $salt
+# trailing comment: also: with: colons
+---
+$body
+EOF
+
+  out=$(xenv get production APP_ENV)
+  assert_eq "production" "$out" "decrypt still works with comment-laden frontmatter"
 }
 
 test_empty_value() {
@@ -661,7 +732,7 @@ run_test "init notes stub mentions project id"      test_init_notes_stub_mention
 run_test "two same-basename projects → unique ids"  test_two_projects_same_basename_get_unique_ids
 run_test "weird basename gets sanitized"            test_basename_sanitization
 run_test "no project.xenv → key lookup fails"       test_no_project_xenv_means_no_key_lookup
-run_test "init params file format"                  test_init_params_file_format
+run_test "init writes KDF params in README frontmatter"  test_init_frontmatter_params
 run_test "init value files are v3 envelopes"        test_init_value_files_are_v3_envelopes
 run_test "init bin/xenv is self-contained"          test_init_bin_xenv_is_self_contained
 
@@ -715,7 +786,10 @@ run_test "partial encrypt failure preserves"        test_partial_encrypt_failure
 # structure
 run_test "each value is own file"                   test_each_value_is_own_file
 run_test "files use .value.enc extension"           test_files_use_value_enc_extension
-run_test "params file named params.xenv"            test_params_file_named_params_xenv
+run_test "no separate params file — frontmatter only"   test_no_separate_params_file
+run_test "frontmatter has DO NOT EDIT warning"           test_frontmatter_has_do_not_edit_warning
+run_test "rotate preserves README body"                  test_rotate_preserves_readme_body
+run_test "frontmatter parser is naive (split on first :)" test_frontmatter_parser_naive_split_on_first_colon
 run_test "empty value round-trips"                  test_empty_value
 run_test "set after unset"                          test_set_after_unset
 

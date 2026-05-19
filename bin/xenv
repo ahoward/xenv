@@ -5,18 +5,18 @@
 #
 #   xenv/
 #     README.md                    — docs for humans AND agents
+#     project.xenv                 — project id (v1:<basename>--<uuid>)
 #     bin/
 #       xenv                       — self-contained copy of this script
-#     production/
-#       README.md                  — per-env doc: vars, how to obtain
-#       params.xenv                — public KDF params (committed, not secret)
-#       APP_ENV.value.enc          — encrypted variable (committed, encrypted)
-#       DATABASE_URL.value.enc
-#       ...
-#     staging/
-#       ...
-#     development/
-#     testing/
+#     envs/
+#       production/
+#         README.md                — frontmatter (KDF params) + per-env docs
+#         APP_ENV.value.enc        — encrypted variable (committed)
+#         DATABASE_URL.value.enc
+#         ...
+#       staging/
+#       development/
+#       testing/
 #
 # Every file under xenv/ is SAFE TO COMMIT by design. The whole `xenv/`
 # directory is the project's environment store — code, config, and data
@@ -32,7 +32,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.5.0-posix"
+XENV_VERSION="0.6.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_VERSION="v1"
@@ -42,7 +42,7 @@ XENV_IV_BYTES=16
 XENV_KEY_BYTES=32
 XENV_MAC_BYTES=32
 XENV_VALUE_EXT=".value.enc"
-XENV_PARAMS_FILE="params.xenv"
+XENV_README_FILE="README.md"
 XENV_PROJECT_FILE="project.xenv"
 XENV_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/xenv"
 XENV_PROJECTS_DIR="$XENV_CONFIG/projects"
@@ -195,8 +195,19 @@ EOF
 
 # ── crypto ────────────────────────────────────────────────────────
 #
-# Per-env KDF parameters live in xenv/<env>/params.xenv:
-#   v3:<iter>:<salt-hex>
+# Per-env KDF parameters live in the YAML frontmatter at the top of
+# xenv/envs/<env>/README.md:
+#
+#   ---
+#   # xenv crypto state — DO NOT EDIT — managed by xenv
+#   xenv_version: v3
+#   xenv_iter: 200000
+#   xenv_salt: 7a2c4f8e1b9d3a6f5e8c2b0a4d7e9f1c
+#   ---
+#
+# The parser is naive on purpose: for each line in the block, split on
+# the FIRST ':', trim both sides. No quoting, no types, no nesting. The
+# README body below the frontmatter is free for humans/agents to edit.
 #
 # Per-value envelope (one line in each KEY.value.enc):
 #   xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>
@@ -270,18 +281,59 @@ EOF
     | openssl enc -d -aes-256-cbc -K "$enc_key_hex" -iv "$iv_hex" 2>/dev/null
 }
 
-# ── per-env directory + params ────────────────────────────────────
+# ── per-env directory + params (in README frontmatter) ────────────
 
 env_dir()     { printf '%s/envs/%s' "$XENV_DIR" "$1"; }
 value_file()  { printf '%s/envs/%s/%s%s' "$XENV_DIR" "$1" "$2" "$XENV_VALUE_EXT"; }
-params_file() { printf '%s/envs/%s/%s' "$XENV_DIR" "$1" "$XENV_PARAMS_FILE"; }
+readme_file() { printf '%s/envs/%s/%s' "$XENV_DIR" "$1" "$XENV_README_FILE"; }
+
+# read_frontmatter <file> — extract the YAML frontmatter block at the
+# top of <file> and emit "key value" lines, one per setting. Naive on
+# purpose: split each line at the FIRST ':', trim both sides. Nothing
+# more. Lines starting with '#' (after trim) and blank lines are skipped.
+# A file with no '---' fence prints nothing (callers handle the empty case).
+read_frontmatter() {
+  awk '
+    function trim(s) {
+      sub(/^[ \t]+/, "", s)
+      sub(/[ \t\r]+$/, "", s)
+      return s
+    }
+    NR == 1 {
+      if ($0 != "---") exit 0
+      in_block = 1
+      next
+    }
+    in_block && $0 == "---" { exit 0 }
+    in_block {
+      line = trim($0)
+      if (line == "" || substr(line, 1, 1) == "#") next
+      i = index(line, ":")
+      if (i == 0) next
+      key = trim(substr(line, 1, i - 1))
+      val = trim(substr(line, i + 1))
+      if (key != "") print key, val
+    }
+  ' "$1"
+}
 
 read_params() {
   env_name=$1
-  pf=$(params_file "$env_name")
-  [ -f "$pf" ] || { err "no params for '$env_name' — run 'xenv keygen $env_name' first"; return 1; }
+  rf=$(readme_file "$env_name")
+  [ -f "$rf" ] || { err "no README for '$env_name' — run 'xenv keygen $env_name' first"; return 1; }
 
-  IFS=: read -r ver iter salt_hex < "$pf"
+  ver=""; iter=""; salt_hex=""
+  while read -r k v; do
+    case "$k" in
+      xenv_version) ver=$v ;;
+      xenv_iter)    iter=$v ;;
+      xenv_salt)    salt_hex=$v ;;
+    esac
+  done <<EOF
+$(read_frontmatter "$rf")
+EOF
+
+  [ -n "$ver" ]                      || { err "params: no xenv_version in $rf frontmatter"; return 1; }
   [ "$ver" = "$XENV_VAULT_VERSION" ] || { err "params: unsupported version $ver"; return 1; }
   [ "${#salt_hex}" -eq 32 ]          || { err "params: invalid salt length"; return 1; }
   case "$salt_hex" in
@@ -294,7 +346,29 @@ read_params() {
   printf '%s %s\n' "$iter" "$salt_hex"
 }
 
-# initialize a new env dir with params.xenv (random salt). must not exist yet.
+# write_frontmatter <env> <iter> <salt-hex> — emit the frontmatter block
+# that goes at the very top of the per-env README. Always the same shape,
+# always the same warning. Crypto state in three flat keys.
+write_frontmatter() {
+  env_name=$1
+  iter=$2
+  salt_hex=$3
+  cat <<EOF
+---
+# xenv crypto state — DO NOT EDIT — managed by xenv
+# changing any value in this block breaks decryption of every
+# .value.enc file in this directory. salt and iter are public
+# (not secrets); the passphrase that pairs with them is stored
+# outside the repo. rotate with: xenv rotate $env_name
+xenv_version: $XENV_VAULT_VERSION
+xenv_iter: $iter
+xenv_salt: $salt_hex
+---
+EOF
+}
+
+# initialize a new env dir. must not exist yet. The README (with
+# frontmatter holding fresh KDF params) is written by write_env_readme.
 init_env_dir() {
   env_name=$1
   dir=$(env_dir "$env_name")
@@ -302,12 +376,6 @@ init_env_dir() {
 
   mkdir -p "$dir"
   chmod 700 "$dir" 2>/dev/null || true
-
-  salt_hex=$(openssl rand -hex "$XENV_SALT_BYTES")
-  umask 077
-  printf '%s:%s:%s\n' "$XENV_VAULT_VERSION" "$XENV_ITER" "$salt_hex" \
-    > "$(params_file "$env_name")"
-  chmod 600 "$(params_file "$env_name")"
 }
 
 # ── passphrase resolution ─────────────────────────────────────────
@@ -457,8 +525,8 @@ has its own `README.md` documenting the variables that env uses.
 Every file in `xenv/` is **safe to commit and safe to share**:
 
 - `*.value.enc` — AES-256-CBC encrypted, useless without the passphrase
-- `params.xenv` — public salt + iteration count, never secret
-- `README.md` — plain documentation, no secrets
+- `README.md` — plain documentation; per-env READMEs hold the public
+  KDF salt + iteration count in YAML frontmatter (never secret)
 
 The **passphrase** is what you must never commit. It lives outside the
 repo in one of (first hit wins):
@@ -495,8 +563,7 @@ no need — use `xenv get` (in-memory) or `xenv run` (exec-time).
         xenv                 ← self-contained copy of the script
       envs/
         production/
-          README.md          ← what variables this env uses
-          params.xenv        ← public KDF params (committed)
+          README.md          ← frontmatter (KDF params) + per-env docs
           APP_ENV.value.enc  ← one encrypted variable
           ...
         staging/      ...
@@ -505,13 +572,22 @@ no need — use `xenv get` (in-memory) or `xenv run` (exec-time).
 EOF
 }
 
-# per-env README.md — env.sample-style doc, project-specific over time
+# write a fresh per-env README. <iter> and <salt-hex> go into the
+# frontmatter (which is what subsequent crypto calls read via read_params).
 write_env_readme() {
   env_name=$1
-  cat > "$(env_dir "$env_name")/README.md" <<EOF
+  iter=$2
+  salt_hex=$3
+  {
+    write_frontmatter "$env_name" "$iter" "$salt_hex"
+    cat <<EOF
+
 # xenv/$env_name
 
 Encrypted environment variables for **$env_name**.
+
+The block above is crypto state — see the warning. Everything below
+is yours to edit.
 
 ## variables
 
@@ -538,6 +614,30 @@ must never be committed.
 For CI, set \`$(env_var_name "$env_name")\` as a secret in the
 platform's secret store.
 EOF
+  } > "$(readme_file "$env_name")"
+}
+
+# rewrite the frontmatter of an existing README, preserving the body.
+# called by rotate so user/agent edits to the prose survive a key rotation.
+rewrite_frontmatter() {
+  env_name=$1
+  iter=$2
+  salt_hex=$3
+  rf=$(readme_file "$env_name")
+  [ -f "$rf" ] || die "no README at $rf to rewrite"
+
+  # strip any existing frontmatter, keep the body verbatim
+  body=$(awk '
+    NR == 1 && $0 == "---" { in_block = 1; next }
+    in_block && $0 == "---" { in_block = 0; stripped = 1; next }
+    in_block { next }
+    { print }
+  ' "$rf")
+
+  {
+    write_frontmatter "$env_name" "$iter" "$salt_hex"
+    printf '%s\n' "$body"
+  } | atomic_write "$rf"
 }
 
 # ── commands ──────────────────────────────────────────────────────
@@ -565,9 +665,9 @@ usage:
 
   xenv help / version
 
-each env is a directory: xenv/<env>/
-each variable is one file: xenv/<env>/KEY.value.enc
-each env has a public params.xenv (salt + iter, safe to commit)
+each env is a directory: xenv/envs/<env>/
+each variable is one file: xenv/envs/<env>/KEY.value.enc
+KDF params live in the per-env README's YAML frontmatter (safe to commit)
 
 key lookup (first hit wins):
   $XENV_KEY_<ENV> → $XENV_KEY → ~/.config/xenv/projects/<id>/keys/<env>
@@ -601,17 +701,19 @@ cmd_init() {
     || die "could not copy $self → $XENV_DIR/bin/xenv"
   chmod +x "$XENV_DIR/bin/xenv"
 
-  # set up each default env: dir + params + passphrase + APP_ENV + README
+  # set up each default env: dir + README (with KDF params in frontmatter) +
+  # passphrase + APP_ENV starter value. README first — read_params needs it.
   for env_name in $XENV_DEFAULT_ENVS; do
     init_env_dir "$env_name"
+
+    salt_hex=$(openssl rand -hex "$XENV_SALT_BYTES")
+    write_env_readme "$env_name" "$XENV_ITER" "$salt_hex"
 
     key=$(openssl rand -base64 32 | tr -d '\n')
     store_key "$env_name" "$key" file >/dev/null 2>&1
 
     write_value "$env_name" "APP_ENV" "$env_name" \
       || die "could not write APP_ENV for $env_name"
-
-    write_env_readme "$env_name"
   done
 
   write_top_readme
@@ -650,9 +752,11 @@ cmd_keygen() {
   fi
 
   init_env_dir "$env_name"
+  salt_hex=$(openssl rand -hex "$XENV_SALT_BYTES")
+  write_env_readme "$env_name" "$XENV_ITER" "$salt_hex"
+
   key=$(openssl rand -base64 32 | tr -d '\n')
   store_key "$env_name" "$key" "$backend"
-  write_env_readme "$env_name"
 
   printf '\nfor CI, set this secret:\n  %s=%s\n' "$(env_var_name "$env_name")" "$key" >&2
 }
@@ -688,9 +792,8 @@ EOF
     printf '%s' "$plain" > "$tmp_stash/$name"
   done
 
-  printf '%s:%s:%s\n' "$XENV_VAULT_VERSION" "$new_iter" "$new_salt" \
-    | atomic_write "$(params_file "$env_name")" || die "could not write new params"
-  chmod 600 "$(params_file "$env_name")"
+  rewrite_frontmatter "$env_name" "$new_iter" "$new_salt" \
+    || die "could not rewrite README frontmatter for $env_name"
 
   for f in "$tmp_stash"/*; do
     [ -f "$f" ] || continue
