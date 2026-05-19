@@ -39,10 +39,35 @@ assert_eq() {
   return 1
 }
 
-# helper: path to the current project's keys directory, derived from
-# xenv/project.xenv. tests use this to inspect or tamper with stored keys.
+# helper: extract a key from the frontmatter at the top of a README.
+# tests use this to read the project id, env salt, etc. naive on purpose.
+read_fm() {
+  file=$1
+  key=$2
+  awk -v want="$key" '
+    NR == 1 && $0 == "---" { in_block = 1; next }
+    in_block && $0 == "---" { exit }
+    in_block {
+      i = index($0, ":")
+      if (i == 0) next
+      k = $0; sub(/[ \t].*$/, "", k); sub(/:$/, "", k)
+      if (k != want) next
+      v = substr($0, i + 1)
+      sub(/^[ \t]+/, "", v); sub(/[ \t\r]+$/, "", v)
+      print v
+      exit
+    }
+  ' "$file"
+}
+
+# helper: project id, read from xenv/README.md's frontmatter.
+project_id() {
+  read_fm xenv/README.md id
+}
+
+# helper: path to the current project's keys directory.
 project_keys_dir() {
-  id=$(cut -d: -f2 xenv/project.xenv)
+  id=$(project_id)
   printf '%s/xenv/projects/%s/keys' "$TEST_CONFIG" "$id"
 }
 
@@ -139,17 +164,23 @@ test_init_refuses_to_reinit() {
 
 # ── project id ────────────────────────────────────────────────────
 
-test_init_creates_project_xenv() {
+test_init_writes_project_id_in_top_readme() {
   xenv init >/dev/null 2>&1
-  [ -f xenv/project.xenv ] || return 1
-  # v1:<sanitized-basename>--<32-hex>
-  contents=$(cat xenv/project.xenv)
-  case "$contents" in
-    "v1:"*--*) ;;
+
+  # no standalone project.xenv anymore — the id lives in xenv/README.md's
+  # frontmatter alongside the format version.
+  [ -f xenv/project.xenv ] && return 1
+  [ -f xenv/README.md ] || return 1
+
+  ver=$(read_fm xenv/README.md version)
+  id=$(read_fm xenv/README.md id)
+
+  [ "$ver" = "v1" ] || return 1
+  # id is <sanitized-basename>--<32-hex>
+  case "$id" in
+    *--*) ;;
     *) return 1 ;;
   esac
-  # extract the id and verify the uuid suffix is 32 lowercase hex chars
-  id=${contents#v1:}
   uuid=${id##*--}
   [ ${#uuid} -eq 32 ] || return 1
   case "$uuid" in
@@ -160,7 +191,7 @@ test_init_creates_project_xenv() {
 
 test_init_creates_per_project_config_dir() {
   xenv init >/dev/null 2>&1
-  id=$(cut -d: -f2 xenv/project.xenv)
+  id=$(project_id)
   pdir="$TEST_CONFIG/xenv/projects/$id"
   [ -d "$pdir" ]         || return 1
   [ -d "$pdir/keys" ]    || return 1
@@ -170,7 +201,7 @@ test_init_creates_per_project_config_dir() {
 
 test_init_origin_file_records_xenv_path() {
   xenv init >/dev/null 2>&1
-  id=$(cut -d: -f2 xenv/project.xenv)
+  id=$(project_id)
   origin=$(cat "$TEST_CONFIG/xenv/projects/$id/origin")
   expected=$(cd xenv && pwd)
   assert_eq "$expected" "$origin" "origin records absolute xenv/ path"
@@ -178,7 +209,7 @@ test_init_origin_file_records_xenv_path() {
 
 test_init_notes_stub_mentions_project_id() {
   xenv init >/dev/null 2>&1
-  id=$(cut -d: -f2 xenv/project.xenv)
+  id=$(project_id)
   grep -q "$id" "$TEST_CONFIG/xenv/projects/$id/notes.md" || return 1
 }
 
@@ -189,11 +220,11 @@ test_two_projects_same_basename_get_unique_ids() {
 
   cd "$TMP/a/foo"
   xenv init >/dev/null 2>&1
-  id_a=$(cut -d: -f2 xenv/project.xenv)
+  id_a=$(project_id)
 
   cd "$TMP/b/foo"
   xenv init >/dev/null 2>&1
-  id_b=$(cut -d: -f2 xenv/project.xenv)
+  id_b=$(project_id)
 
   # both should have "foo--" prefix
   case "$id_a" in foo--*) ;; *) return 1 ;; esac
@@ -216,7 +247,7 @@ test_basename_sanitization() {
   mkdir -p "$TMP/My Project!"
   cd "$TMP/My Project!"
   xenv init >/dev/null 2>&1
-  id=$(cut -d: -f2 xenv/project.xenv)
+  id=$(project_id)
   # should be lowercase, non-alnum→-, collapsed runs
   case "$id" in
     my-project--*) return 0 ;;
@@ -224,9 +255,10 @@ test_basename_sanitization() {
   esac
 }
 
-test_no_project_xenv_means_no_key_lookup() {
-  # without project.xenv, any operation that needs a key must fail cleanly.
-  # (list doesn't need a key — it just `ls`s files. but get does.)
+test_no_top_readme_means_no_key_lookup() {
+  # without xenv/README.md (where the project id lives), any operation
+  # that needs a key must fail cleanly. (list doesn't need a key — it just
+  # `ls`s files. but get does.)
   mkdir -p xenv/envs/production
   # plant a syntactically-valid envelope so we get past the file-exists check
   # and into the key-lookup path
@@ -234,7 +266,7 @@ test_no_project_xenv_means_no_key_lookup() {
     > xenv/envs/production/APP_ENV.value.enc
 
   out=$(xenv get production APP_ENV 2>&1) && return 1
-  echo "$out" | grep -qi "no key\|run 'xenv init'\|project.xenv" || return 1
+  echo "$out" | grep -qi "no key\|run 'xenv init'\|README\.md" || return 1
   return 0
 }
 
@@ -246,11 +278,11 @@ test_init_frontmatter_params() {
   # README must start with the frontmatter fence
   head -n 1 "$rf" | grep -qx -- '---' || return 1
 
-  # extract the params block — lines between the first two '---' fences
+  # bare keys — the file's location implies "this is xenv crypto state"
   block=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{exit} p' "$rf")
-  echo "$block" | grep -q '^xenv_version: v3$'        || return 1
-  echo "$block" | grep -q '^xenv_iter: 200000$'       || return 1
-  echo "$block" | grep -qE '^xenv_salt: [0-9a-f]{32}$' || return 1
+  echo "$block" | grep -q '^version: v3$'         || return 1
+  echo "$block" | grep -q '^iter: 200000$'        || return 1
+  echo "$block" | grep -qE '^salt: [0-9a-f]{32}$' || return 1
 
   # body of the README must still be there
   grep -q "xenv/production" "$rf" || return 1
@@ -629,6 +661,24 @@ test_no_separate_params_file() {
   return 0
 }
 
+test_no_separate_project_file() {
+  # the project id used to live in project.xenv. it's now in the top-level
+  # README's frontmatter — there should be no project.xenv anywhere.
+  xenv init >/dev/null 2>&1
+  [ -f xenv/project.xenv ] && return 1
+  [ -f xenv/.project ]     && return 1
+  return 0
+}
+
+test_top_readme_frontmatter_has_do_not_edit_warning() {
+  # the project-state frontmatter should carry the same unmissable warning
+  # as the per-env crypto-state frontmatter. one pattern, applied uniformly.
+  xenv init >/dev/null 2>&1
+  rf=xenv/README.md
+  block=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{exit} p' "$rf")
+  echo "$block" | grep -qi "DO NOT EDIT" || return 1
+}
+
 test_frontmatter_has_do_not_edit_warning() {
   # the frontmatter is one keystroke from breaking decryption. it must
   # carry an unmissable warning so an agent reading it knows to leave it alone.
@@ -649,12 +699,12 @@ test_rotate_preserves_readme_body() {
 
   # capture the body (everything after the frontmatter) before rotation
   body_before=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{p=0;next} !p' "$rf")
-  salt_before=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{exit} p && /^xenv_salt:/{print $2}' "$rf")
+  salt_before=$(read_fm "$rf" salt)
 
   xenv rotate production >/dev/null 2>&1 || return 1
 
   body_after=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{p=0;next} !p' "$rf")
-  salt_after=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{exit} p && /^xenv_salt:/{print $2}' "$rf")
+  salt_after=$(read_fm "$rf" salt)
 
   # body identical, salt changed
   [ "$body_before" = "$body_after" ] || return 1
@@ -674,15 +724,15 @@ test_frontmatter_parser_naive_split_on_first_colon() {
   # the existing salt is what works. read it, then rewrite the frontmatter
   # with a value that contains internal colons in a comment to prove the
   # parser isn't confused. (we can't put colons in salt — it's hex.)
-  salt=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{exit} p && /^xenv_salt:/{print $2}' "$rf")
+  salt=$(read_fm "$rf" salt)
   body=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{p=0;next} !p' "$rf")
 
   cat > "$rf" <<EOF
 ---
 # stress: nothing here:should:confuse:the:parser
-xenv_version: v3
-xenv_iter: 200000
-xenv_salt: $salt
+version: v3
+iter: 200000
+salt: $salt
 # trailing comment: also: with: colons
 ---
 $body
@@ -725,13 +775,14 @@ run_test "init per-env README mentions env name"    test_init_per_env_readme_men
 run_test "init refuses to re-init"                  test_init_refuses_to_reinit
 
 # project id
-run_test "init creates xenv/project.xenv"           test_init_creates_project_xenv
+run_test "init writes project id in xenv/README.md frontmatter" \
+                                                    test_init_writes_project_id_in_top_readme
 run_test "init creates per-project config dir"      test_init_creates_per_project_config_dir
 run_test "init origin file records xenv/ path"      test_init_origin_file_records_xenv_path
 run_test "init notes stub mentions project id"      test_init_notes_stub_mentions_project_id
 run_test "two same-basename projects → unique ids"  test_two_projects_same_basename_get_unique_ids
 run_test "weird basename gets sanitized"            test_basename_sanitization
-run_test "no project.xenv → key lookup fails"       test_no_project_xenv_means_no_key_lookup
+run_test "no xenv/README.md → key lookup fails"     test_no_top_readme_means_no_key_lookup
 run_test "init writes KDF params in README frontmatter"  test_init_frontmatter_params
 run_test "init value files are v3 envelopes"        test_init_value_files_are_v3_envelopes
 run_test "init bin/xenv is self-contained"          test_init_bin_xenv_is_self_contained
@@ -787,6 +838,8 @@ run_test "partial encrypt failure preserves"        test_partial_encrypt_failure
 run_test "each value is own file"                   test_each_value_is_own_file
 run_test "files use .value.enc extension"           test_files_use_value_enc_extension
 run_test "no separate params file — frontmatter only"   test_no_separate_params_file
+run_test "no separate project file — frontmatter only"  test_no_separate_project_file
+run_test "top README frontmatter has DO NOT EDIT"        test_top_readme_frontmatter_has_do_not_edit_warning
 run_test "frontmatter has DO NOT EDIT warning"           test_frontmatter_has_do_not_edit_warning
 run_test "rotate preserves README body"                  test_rotate_preserves_readme_body
 run_test "frontmatter parser is naive (split on first :)" test_frontmatter_parser_naive_split_on_first_colon

@@ -4,8 +4,7 @@
 # Project layout:
 #
 #   xenv/
-#     README.md                    — docs for humans AND agents
-#     project.xenv                 — project id (v1:<basename>--<uuid>)
+#     README.md                    — frontmatter (project id) + docs
 #     bin/
 #       xenv                       — self-contained copy of this script
 #     envs/
@@ -17,6 +16,10 @@
 #       staging/
 #       development/
 #       testing/
+#
+# Every README.md opens with YAML frontmatter holding the metadata
+# for its directory. Keys are simple (version, iter, salt, id) — the
+# file's location implies whether they describe the project or an env.
 #
 # Every file under xenv/ is SAFE TO COMMIT by design. The whole `xenv/`
 # directory is the project's environment store — code, config, and data
@@ -32,10 +35,10 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.6.0-posix"
+XENV_VERSION="0.7.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
-XENV_PROJECT_VERSION="v1"
+XENV_PROJECT_FORMAT="v1"
 XENV_ITER=200000
 XENV_SALT_BYTES=16
 XENV_IV_BYTES=16
@@ -43,7 +46,6 @@ XENV_KEY_BYTES=32
 XENV_MAC_BYTES=32
 XENV_VALUE_EXT=".value.enc"
 XENV_README_FILE="README.md"
-XENV_PROJECT_FILE="project.xenv"
 XENV_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/xenv"
 XENV_PROJECTS_DIR="$XENV_CONFIG/projects"
 
@@ -78,10 +80,14 @@ hex_decode() {
 
 # ── project id ────────────────────────────────────────────────────
 #
-# Every initialized project gets a unique id, stored in
-# xenv/project.xenv as a single line:
+# Every initialized project gets a unique id, stored in YAML
+# frontmatter at the top of xenv/README.md:
 #
-#   v1:<sanitized-basename>--<32-hex-uuid>
+#   ---
+#   # xenv project state — DO NOT EDIT — managed by xenv
+#   version: v1
+#   id: <sanitized-basename>--<32-hex-uuid>
+#   ---
 #
 # The id is human-readable (so you can `ls ~/.config/xenv/projects/`
 # and recognize what's what) but disambiguated by 128 bits of
@@ -92,12 +98,13 @@ hex_decode() {
 #   ~/.config/xenv/projects/<id>/
 #     keys/<env>     ← passphrases, mode 600 (never committed)
 #     origin        ← absolute path of xenv/ at last init (informational)
-#     notes.md     ← user's per-project notebook (survives the project)
+#     notes.md      ← user's per-project notebook (survives the project)
 #
-# The project.xenv file itself IS safe to commit — it carries no secrets,
-# just the identifier that binds a checkout to a local keys directory.
-# Teammates cloning the same repo share the project id and each set up
-# their own local passphrase under their own ~/.config/xenv/projects/<id>/.
+# The id is safe to commit. It carries no secret — it's just the
+# identifier that binds a checkout to a local keys directory.
+# Teammates cloning the same repo share the project id and each set
+# up their own local passphrase under their own
+# ~/.config/xenv/projects/<id>/.
 
 # turn a project basename into something filesystem-friendly. lowercase,
 # replace any non-[A-Za-z0-9._-] with -, collapse runs of -, trim leading/
@@ -134,19 +141,30 @@ new_project_id() {
   printf '%s--%s' "$base" "$uuid"
 }
 
-# read the project id from xenv/project.xenv. errors if missing or malformed.
+# read the project id from xenv/README.md frontmatter.
+# errors if missing or malformed.
 read_project_id() {
-  pf="$XENV_DIR/$XENV_PROJECT_FILE"
-  [ -f "$pf" ] || { err "no $pf — run 'xenv init'"; return 1; }
+  rf="$XENV_DIR/$XENV_README_FILE"
+  [ -f "$rf" ] || { err "no $rf — run 'xenv init'"; return 1; }
 
-  IFS=: read -r ver id < "$pf"
-  [ "$ver" = "$XENV_PROJECT_VERSION" ] \
-    || { err "project.xenv: unsupported version $ver"; return 1; }
-  [ -n "$id" ] || { err "project.xenv: empty id"; return 1; }
+  ver=""; id=""
+  while read -r k v; do
+    case "$k" in
+      version) ver=$v ;;
+      id)      id=$v ;;
+    esac
+  done <<EOF
+$(read_frontmatter "$rf")
+EOF
+
+  [ -n "$ver" ]                    || { err "$rf: no project version in frontmatter"; return 1; }
+  [ "$ver" = "$XENV_PROJECT_FORMAT" ] \
+    || { err "$rf: unsupported project version $ver"; return 1; }
+  [ -n "$id" ]                     || { err "$rf: no project id in frontmatter"; return 1; }
   # sanity: id should be sanitized-basename--32hex.
   case "$id" in
     *--*) ;;
-    *) err "project.xenv: malformed id"; return 1 ;;
+    *) err "$rf: malformed project id"; return 1 ;;
   esac
   printf '%s' "$id"
 }
@@ -200,10 +218,13 @@ EOF
 #
 #   ---
 #   # xenv crypto state — DO NOT EDIT — managed by xenv
-#   xenv_version: v3
-#   xenv_iter: 200000
-#   xenv_salt: 7a2c4f8e1b9d3a6f5e8c2b0a4d7e9f1c
+#   version: v3
+#   iter: 200000
+#   salt: 7a2c4f8e1b9d3a6f5e8c2b0a4d7e9f1c
 #   ---
+#
+# Keys are bare. The file's location implies the scope; no need to
+# spell "xenv_iter" when you're in a file under xenv/envs/<env>/.
 #
 # The parser is naive on purpose: for each line in the block, split on
 # the FIRST ':', trim both sides. No quoting, no types, no nesting. The
@@ -325,15 +346,15 @@ read_params() {
   ver=""; iter=""; salt_hex=""
   while read -r k v; do
     case "$k" in
-      xenv_version) ver=$v ;;
-      xenv_iter)    iter=$v ;;
-      xenv_salt)    salt_hex=$v ;;
+      version) ver=$v ;;
+      iter)    iter=$v ;;
+      salt)    salt_hex=$v ;;
     esac
   done <<EOF
 $(read_frontmatter "$rf")
 EOF
 
-  [ -n "$ver" ]                      || { err "params: no xenv_version in $rf frontmatter"; return 1; }
+  [ -n "$ver" ]                      || { err "params: no version in $rf frontmatter"; return 1; }
   [ "$ver" = "$XENV_VAULT_VERSION" ] || { err "params: unsupported version $ver"; return 1; }
   [ "${#salt_hex}" -eq 32 ]          || { err "params: invalid salt length"; return 1; }
   case "$salt_hex" in
@@ -360,9 +381,9 @@ write_frontmatter() {
 # .value.enc file in this directory. salt and iter are public
 # (not secrets); the passphrase that pairs with them is stored
 # outside the repo. rotate with: xenv rotate $env_name
-xenv_version: $XENV_VAULT_VERSION
-xenv_iter: $iter
-xenv_salt: $salt_hex
+version: $XENV_VAULT_VERSION
+iter: $iter
+salt: $salt_hex
 ---
 EOF
 }
@@ -498,13 +519,31 @@ EOF
 
 # ── README templates ─────────────────────────────────────────────
 
-# top-level xenv/README.md — addresses both humans and agents
+# top-level xenv/README.md — frontmatter (project id) + docs.
+# The id is the only piece of project-scope metadata: a 128-bit-random
+# identifier that binds this checkout to ~/.config/xenv/projects/<id>/.
 write_top_readme() {
-  cat > "$XENV_DIR/README.md" <<'EOF'
+  project_id=$1
+  {
+    cat <<EOF
+---
+# xenv project state — DO NOT EDIT — managed by xenv
+# this id binds this checkout to a local passphrase storage
+# location at ~/.config/xenv/projects/<id>/. it's safe to commit
+# (the secret is the passphrase that lives there, not this id).
+version: $XENV_PROJECT_FORMAT
+id: $project_id
+---
+EOF
+    cat <<'EOF'
+
 # xenv/
 
 Encrypted environment variables for this project. Every file under
 this directory is **safe to commit by design**.
+
+The block above is project state — see the warning. Everything below
+is yours to edit.
 
 ## for humans
 
@@ -525,8 +564,9 @@ has its own `README.md` documenting the variables that env uses.
 Every file in `xenv/` is **safe to commit and safe to share**:
 
 - `*.value.enc` — AES-256-CBC encrypted, useless without the passphrase
-- `README.md` — plain documentation; per-env READMEs hold the public
-  KDF salt + iteration count in YAML frontmatter (never secret)
+- `README.md` — plain documentation. The top-level README holds the
+  project id in its frontmatter; per-env READMEs hold the public KDF
+  salt + iteration count in theirs. Neither is secret.
 
 The **passphrase** is what you must never commit. It lives outside the
 repo in one of (first hit wins):
@@ -537,8 +577,8 @@ repo in one of (first hit wins):
   4. macOS keychain (account `<project-id>/<env>`, service `xenv`)
   5. `pass show xenv/<project-id>/<env>`
 
-The project-id lives in `xenv/project.xenv` and binds this checkout
-to a local keys directory. It is safe to commit.
+The project id lives in this README's frontmatter and binds this
+checkout to a local keys directory. It is safe to commit.
 
 To add a new value:
 
@@ -558,7 +598,7 @@ no need — use `xenv get` (in-memory) or `xenv run` (exec-time).
 ## structure
 
     xenv/
-      README.md              ← this file
+      README.md              ← this file (frontmatter: project id)
       bin/
         xenv                 ← self-contained copy of the script
       envs/
@@ -570,6 +610,7 @@ no need — use `xenv get` (in-memory) or `xenv run` (exec-time).
         development/  ...
         testing/      ...
 EOF
+  } > "$XENV_DIR/README.md"
 }
 
 # write a fresh per-env README. <iter> and <salt-hex> go into the
@@ -679,13 +720,13 @@ cmd_version() { printf 'xenv %s\n' "$XENV_VERSION"; }
 
 cmd_init() {
   [ -d "$XENV_DIR" ] && die "$XENV_DIR/ already exists — delete it to re-init"
-  [ -f "$XENV_DIR/$XENV_PROJECT_FILE" ] && die "$XENV_DIR/$XENV_PROJECT_FILE exists — delete it to re-init"
 
   mkdir -p "$XENV_DIR/bin" "$XENV_DIR/envs"
 
-  # write project.xenv first — everything downstream (store_key, etc) needs it
+  # write the top-level README with the project id in its frontmatter
+  # FIRST — everything downstream (store_key, etc) reads the id from there.
   project_id=$(new_project_id)
-  printf '%s:%s\n' "$XENV_PROJECT_VERSION" "$project_id" > "$XENV_DIR/$XENV_PROJECT_FILE"
+  write_top_readme "$project_id"
 
   # bootstrap the per-project config dir: keys/, origin, notes.md
   origin=$(cd "$XENV_DIR" && pwd)
@@ -715,8 +756,6 @@ cmd_init() {
     write_value "$env_name" "APP_ENV" "$env_name" \
       || die "could not write APP_ENV for $env_name"
   done
-
-  write_top_readme
 
   info "initialized $XENV_DIR/ with envs: $XENV_DEFAULT_ENVS"
   info "project id: $project_id"

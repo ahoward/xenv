@@ -10,7 +10,7 @@ xenv get    production DATABASE_URL        # silent on success — pipeable
 xenv run    production ./server            # exec with the env injected
 ```
 
-no package manager. no daemon. no `.env` file. no plaintext on disk, ever. one POSIX shell script. 60 tests pass under `/bin/sh` and `/usr/bin/dash`.
+no package manager. no daemon. no `.env` file. no plaintext on disk, ever. one POSIX shell script. 62 tests pass under `/bin/sh` and `/usr/bin/dash`.
 
 ```
 $ wc -l bin/xenv test/run.sh
@@ -36,13 +36,12 @@ requirements: `sh`, `openssl 3.0+` (for `kdf`), `awk`, `mktemp`, `od`. all POSIX
 ```
 myproject/
 └── xenv/                           ← every file here is safe to commit
-    ├── README.md                   ← docs for humans AND agents
-    ├── project.xenv                ← v1:myproject--<32-hex-uuid>
+    ├── README.md                   ← frontmatter (project id) + docs
     ├── bin/
     │   └── xenv                    ← self-contained copy of the script
     └── envs/
         ├── testing/
-        │   ├── README.md           ← YAML frontmatter (KDF params) + docs
+        │   ├── README.md           ← frontmatter (KDF params) + per-env docs
         │   └── APP_ENV.value.enc   ← AES-256-CBC + HMAC-SHA256
         ├── development/
         ├── staging/
@@ -102,7 +101,7 @@ XENV_KEY_PRODUCTION=$SECRET xenv run production ./deploy
 scripting against `xenv` should be boring and predictable. here's what you get today:
 
 - **exit 0** — success. `xenv get` prints the value on stdout, nothing on stderr.
-- **exit 1** — anything went wrong. error goes to stderr with the `xenv: ` prefix. that includes: no env, no key, wrong passphrase / MAC failure, decrypt failed, tampered envelope, openssl missing, no `project.xenv`.
+- **exit 1** — anything went wrong. error goes to stderr with the `xenv: ` prefix. that includes: no env, no key, wrong passphrase / MAC failure, decrypt failed, tampered envelope, openssl missing, missing or malformed `xenv/README.md` frontmatter.
 
 distinct codes for distinct failures is a future enhancement. for now the safe pattern is:
 
@@ -137,7 +136,22 @@ every `.value.enc` file is a single line: `xenv:v3:<iv>:<ct>:<mac>`. encrypted, 
 
 ## KDF params in frontmatter
 
-each per-env `README.md` opens with YAML frontmatter:
+both READMEs in `xenv/` — the top-level one and one per env — open with YAML frontmatter. **same pattern, applied at both scopes**: project state at the top, crypto state per env. keys are bare (`version`, `iter`, `salt`, `id`); the file's location tells you what they describe.
+
+top-level `xenv/README.md`:
+
+```yaml
+---
+# xenv project state — DO NOT EDIT — managed by xenv
+version: v1
+id: myproject--7a2c4f8e1b9d3a6f5e8c2b0a4d7e9f1c
+---
+
+# xenv/
+...
+```
+
+per-env `xenv/envs/production/README.md`:
 
 ```yaml
 ---
@@ -146,9 +160,9 @@ each per-env `README.md` opens with YAML frontmatter:
 # .value.enc file in this directory. salt and iter are public
 # (not secrets); the passphrase that pairs with them is stored
 # outside the repo. rotate with: xenv rotate production
-xenv_version: v3
-xenv_iter: 200000
-xenv_salt: a449a01266a1adf926a541ecd72dd2c2
+version: v3
+iter: 200000
+salt: a449a01266a1adf926a541ecd72dd2c2
 ---
 
 # xenv/production
@@ -157,19 +171,19 @@ Encrypted environment variables for **production**.
 ...
 ```
 
-the body below the fence is yours — document variables, record who has access, leave notes for the next developer. `xenv rotate` rewrites the frontmatter in place and **preserves the body verbatim**. your notes survive a key rotation.
+the body below the fence is yours — document variables, record who has access, leave notes for the next developer. `xenv rotate` rewrites the per-env frontmatter in place and **preserves the body verbatim**. your notes survive a key rotation.
 
 the parser is twenty lines of awk and deliberately naive: for each line in the frontmatter block, split on the **first** `:`, trim whitespace. no quoting, no nesting, no types. `key: value:with:colons` yields key=`key`, value=`value:with:colons`. impossible to misparse because there's nothing to parse cleverly.
 
 ## project ids
 
-`xenv/project.xenv` is one line:
+the project id lives in `xenv/README.md`'s frontmatter, as `id:`. concretely:
 
 ```
-v1:myproject--7a2c4f8e1b9d3a6f5e8c2b0a4d7e9f1c
+id: myproject--7a2c4f8e1b9d3a6f5e8c2b0a4d7e9f1c
 ```
 
-human-readable prefix, 128-bit random suffix. two projects called `foo` on the same machine get different ids, so they never collide on key storage. teammates cloning your repo see the same `project.xenv` and each set up their own passphrases under their own `~/.config/xenv/projects/<id>/`.
+human-readable prefix, 128-bit random suffix. two projects called `foo` on the same machine get different ids, so they never collide on key storage. teammates cloning your repo see the same project id in the README and each set up their own passphrases under their own `~/.config/xenv/projects/<id>/`.
 
 the project id is **safe to commit**. it identifies the project, not the secret.
 
@@ -241,7 +255,7 @@ test/run.sh                                # uses $SHELL_BIN or /bin/sh
 SHELL_BIN=/usr/bin/dash test/run.sh        # verify strict POSIX
 ```
 
-60 tests. covers init layout, per-key file model, frontmatter parser, rotation preserving the README body, project-id uniqueness, MAC tamper detection, multi-line and PEM values, concurrent writes, partial-failure atomicity, env-var precedence, and the rest.
+62 tests. covers init layout, per-key file model, frontmatter parser at both scopes (project and env), DO-NOT-EDIT warnings on both READMEs, rotation preserving the README body, project-id uniqueness, MAC tamper detection, multi-line and PEM values, concurrent writes, partial-failure atomicity, env-var precedence, and the rest.
 
 ## notes
 
