@@ -189,7 +189,15 @@ the encrypt/decrypt functions in this repo *are* the spec. each is ~15 lines of 
 - [`encrypt_value`](bin/xenv#L278) — plaintext → `xenv:v3:<iv>:<ct>:<mac>`. AES-256-CBC + HMAC-SHA256.
 - [`decrypt_value`](bin/xenv#L301) — envelope → plaintext. MAC verify first, then decrypt.
 
-read those three functions and you've read xenv. any agent with this README and access to those primitives in any language — `openssl`, Python's `cryptography`, Go's `crypto/aes`, Node's `crypto`, Rust's `aes-gcm`/`hmac` — can write its own loader, decrypter, or rotation tool in under 50 lines. there is no proprietary format, no library lock-in, no runtime. **xenv is a convention plus a 1000-line shell wrapper around `openssl(1)`.** the convention is what matters; the wrapper is convenience.
+read those three functions and you've read xenv. there is no proprietary format, no library lock-in, no runtime. **xenv is a convention plus a 1000-line POSIX shell wrapper around `openssl(1)`.** the convention is what matters; the wrapper is convenience.
+
+to prove this, [`loaders/`](loaders/) holds reference read-only loaders in three languages, all generated from a single [`AGENT_PROMPT.md`](loaders/AGENT_PROMPT.md):
+
+- [`loaders/pythong/xenv.py`](loaders/pythong/xenv.py) — 150 lines, stdlib + `openssl(1)` for AES
+- [`loaders/node/xenv.js`](loaders/node/xenv.js) — 150 lines, pure stdlib `crypto`
+- [`loaders/go/xenv/xenv.go`](loaders/go/xenv/xenv.go) — 240 lines, stdlib + `golang.org/x/crypto/pbkdf2`
+
+`loaders/test.sh` exercises all three against a real vault. an agent with this README and the prompt file can produce a working loader in any language with PBKDF2-SHA256, HMAC-SHA256, and AES-256-CBC primitives (which is every modern language).
 
 if this tool ever disappeared, your data wouldn't.
 

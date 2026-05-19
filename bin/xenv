@@ -631,11 +631,13 @@ functions, each ~15 lines:
 - `encrypt_value`  — plaintext → `xenv:v3:<iv>:<ct>:<mac>`. AES-256-CBC + HMAC-SHA256.
 - `decrypt_value`  — envelope → plaintext. MAC verify first, then decrypt.
 
-Read those three functions and you've read xenv. An agent with this
-README and access to those primitives in any language (Python's
-`cryptography`, Go's `crypto/aes`, Node's `crypto`, etc.) can write
-its own loader in under 50 lines. No proprietary format, no library
-lock-in, no runtime.
+Read those three functions and you've read xenv. No proprietary
+format, no library lock-in, no runtime.
+
+The upstream repo ships reference read-only loaders for Python,
+Node, and Go at <https://github.com/ahoward/xenv/tree/main/loaders>,
+all generated from a single `loaders/AGENT_PROMPT.md` you can feed
+to any coding agent.
 
 If this tool ever disappeared, your data wouldn't.
 
