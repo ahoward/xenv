@@ -547,6 +547,9 @@ EOF
 Encrypted environment variables for this project. Every file under
 this directory is **safe to commit by design**.
 
+POSIX compliant. Git and agent friendly. Zero lock-in. Simple
+secrets management for discerning developers.
+
 **Tool source**: <https://github.com/ahoward/xenv>. An agent reading
 this README can clone that repo to inspect the script, the test
 suite, and the wire format documentation. The script itself lives

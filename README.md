@@ -2,6 +2,8 @@
 
 encrypted environment variables. one file per key. every file safe to commit.
 
+posix compliant. git and agent friendly. zero lock-in. simple secrets management for discerning developers.
+
 ```
 xenv
 ├── README.md                       # frontmatter (project id) + docs
