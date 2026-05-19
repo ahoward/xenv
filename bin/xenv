@@ -547,6 +547,11 @@ EOF
 Encrypted environment variables for this project. Every file under
 this directory is **safe to commit by design**.
 
+**Tool source**: <https://github.com/ahoward/xenv>. An agent reading
+this README can clone that repo to inspect the script, the test
+suite, and the wire format documentation. The script itself lives
+at `xenv/bin/xenv` inside *this* project — a self-contained copy.
+
 The block above is project state — see the warning. Everything below
 is yours to edit.
 
@@ -599,6 +604,59 @@ To run a command with all the env's vars injected:
 
 **Never** decrypt to a plaintext file you might `git add`. There's
 no need — use `xenv get` (in-memory) or `xenv run` (exec-time).
+
+## without xenv
+
+The format is openable with bare `openssl(1)`. If this tool ever
+disappeared, your data wouldn't.
+
+A `.value.enc` is one line: `xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>`.
+The per-env README frontmatter gives you `iter` and `salt`. The
+passphrase lives wherever you put it.
+
+Decrypt one value:
+
+```sh
+PASS=$(cat ~/.config/xenv/projects/<project-id>/keys/production)
+SALT=$(awk '/^salt:/ {print $2}' xenv/envs/production/README.md)
+ITER=$(awk '/^iter:/ {print $2}' xenv/envs/production/README.md)
+
+# PBKDF2-SHA256 → 64 bytes; first 32 = enc key, last 32 = MAC key
+KEYS=$(openssl kdf -keylen 64 -kdfopt digest:SHA256 \
+       -kdfopt "pass:$PASS" -kdfopt "hexsalt:$SALT" \
+       -kdfopt "iter:$ITER" -binary PBKDF2 \
+       | od -An -vtx1 | tr -d ' \n')
+ENC_KEY=$(printf '%s' "$KEYS" | cut -c1-64)
+MAC_KEY=$(printf '%s' "$KEYS" | cut -c65-128)
+
+IFS=: read -r _ _ IV CT MAC < xenv/envs/production/HELLO.value.enc
+
+# verify MAC first (encrypt-then-MAC; "v3:<iv>:<ct>" is the MAC scope)
+EXPECTED=$(printf 'v3:%s:%s' "$IV" "$CT" \
+           | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$MAC_KEY" -binary \
+           | od -An -vtx1 | tr -d ' \n')
+[ "$MAC" = "$EXPECTED" ] || { echo "MAC mismatch" >&2; exit 1; }
+
+# decrypt
+printf '%s' "$CT" | xxd -r -p \
+  | openssl enc -d -aes-256-cbc -K "$ENC_KEY" -iv "$IV"
+```
+
+Encrypt one value:
+
+```sh
+IV=$(openssl rand -hex 16)
+CT=$(printf '%s' "$plaintext" \
+     | openssl enc -aes-256-cbc -K "$ENC_KEY" -iv "$IV" \
+     | od -An -vtx1 | tr -d ' \n')
+MAC=$(printf 'v3:%s:%s' "$IV" "$CT" \
+      | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$MAC_KEY" -binary \
+      | od -An -vtx1 | tr -d ' \n')
+printf 'xenv:v3:%s:%s:%s\n' "$IV" "$CT" "$MAC" > xenv/envs/production/HELLO.value.enc
+```
+
+`xenv` itself uses exactly this recipe (see the `derive_keys`,
+`encrypt_value`, `decrypt_value` functions in `bin/xenv`).
 
 ## structure
 

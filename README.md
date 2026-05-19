@@ -180,6 +180,59 @@ the version string `v3` is part of the MAC scope. rollback to a future format fa
 
 the encryption key and MAC key are derived from separate halves of a single PBKDF2 output. one passphrase, two keys, no reuse.
 
+## without xenv
+
+the format is openable with bare `openssl(1)`. if this tool ever disappeared, your data wouldn't. an agent (or a future you, or a future me) staring at a `.value.enc` and a per-env README can recover the plaintext with the recipe below.
+
+decrypt one value:
+
+```sh
+PASS=$(cat ~/.config/xenv/projects/<project-id>/keys/production)
+SALT=$(awk '/^salt:/ {print $2}' xenv/envs/production/README.md)
+ITER=$(awk '/^iter:/ {print $2}' xenv/envs/production/README.md)
+
+# PBKDF2-SHA256 → 64 bytes; first 32 = enc key, last 32 = MAC key
+KEYS=$(openssl kdf -keylen 64 -kdfopt digest:SHA256 \
+       -kdfopt "pass:$PASS" -kdfopt "hexsalt:$SALT" \
+       -kdfopt "iter:$ITER" -binary PBKDF2 \
+       | od -An -vtx1 | tr -d ' \n')
+ENC_KEY=$(printf '%s' "$KEYS" | cut -c1-64)
+MAC_KEY=$(printf '%s' "$KEYS" | cut -c65-128)
+
+IFS=: read -r _ _ IV CT MAC < xenv/envs/production/HELLO.value.enc
+
+# verify MAC first (encrypt-then-MAC; "v3:<iv>:<ct>" is the MAC scope)
+EXPECTED=$(printf 'v3:%s:%s' "$IV" "$CT" \
+           | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$MAC_KEY" -binary \
+           | od -An -vtx1 | tr -d ' \n')
+[ "$MAC" = "$EXPECTED" ] || { echo "MAC mismatch" >&2; exit 1; }
+
+# decrypt
+printf '%s' "$CT" | xxd -r -p \
+  | openssl enc -d -aes-256-cbc -K "$ENC_KEY" -iv "$IV"
+```
+
+encrypt one value (assuming `$ENC_KEY` + `$MAC_KEY` already derived as above):
+
+```sh
+IV=$(openssl rand -hex 16)
+CT=$(printf '%s' "$plaintext" \
+     | openssl enc -aes-256-cbc -K "$ENC_KEY" -iv "$IV" \
+     | od -An -vtx1 | tr -d ' \n')
+MAC=$(printf 'v3:%s:%s' "$IV" "$CT" \
+      | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$MAC_KEY" -binary \
+      | od -An -vtx1 | tr -d ' \n')
+printf 'xenv:v3:%s:%s:%s\n' "$IV" "$CT" "$MAC" > xenv/envs/production/HELLO.value.enc
+```
+
+inject for one command (no `xenv run` needed, since you have the plaintext):
+
+```sh
+HELLO=$(...the decrypt recipe above...) ./your-command
+```
+
+this isn't a replacement workflow — it's a proof of openness. `xenv` itself uses exactly these primitives (see `derive_keys`, `encrypt_value`, `decrypt_value` in `bin/xenv`).
+
 ## threat model
 
 a **dev tool for one human (or a small trusted team)**. it protects against:
