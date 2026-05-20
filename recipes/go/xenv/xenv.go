@@ -1,15 +1,18 @@
-// Package xenv is a read-only loader for the xenv encrypted-environment
-// format. Generated from ../AGENT_PROMPT.md as a reference implementation.
+// Package xenv is a minimal-but-complete recipe for the xenv
+// encrypted-environment format. Generated from ../../README.md.
 //
-// Crypto: stdlib (crypto/aes, crypto/cipher, crypto/hmac, crypto/sha256)
-// plus golang.org/x/crypto/pbkdf2 for the KDF. No third-party dep beyond
-// the well-known x/crypto subrepo.
+// Three operations: Get (read one), Set (write one), Load (read all).
+// No rotate, no init, no edit — those are the shell tool's job.
+//
+// Crypto: stdlib (crypto/aes, crypto/cipher, crypto/hmac, crypto/sha256,
+// crypto/rand) plus golang.org/x/crypto/pbkdf2 for the KDF.
 package xenv
 
 import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -176,6 +179,95 @@ func decryptEnvelope(envelope string, encKey, macKey []byte) ([]byte, error) {
 	return plain[:len(plain)-pad], nil
 }
 
+func encryptEnvelope(plaintext, encKey, macKey []byte) (string, error) {
+	block, err := aes.NewCipher(encKey)
+	if err != nil {
+		return "", err
+	}
+	iv := make([]byte, block.BlockSize())
+	if _, err := rand.Read(iv); err != nil {
+		return "", err
+	}
+
+	// PKCS#7 pad
+	bs := block.BlockSize()
+	pad := bs - (len(plaintext) % bs)
+	padded := make([]byte, len(plaintext)+pad)
+	copy(padded, plaintext)
+	for i := len(plaintext); i < len(padded); i++ {
+		padded[i] = byte(pad)
+	}
+
+	ct := make([]byte, len(padded))
+	mode := cipher.NewCBCEncrypter(block, iv)
+	mode.CryptBlocks(ct, padded)
+
+	ivHex := hex.EncodeToString(iv)
+	ctHex := hex.EncodeToString(ct)
+	macScope := fmt.Sprintf("%s:%s:%s", vaultVersion, ivHex, ctHex)
+	h := hmac.New(sha256.New, macKey)
+	h.Write([]byte(macScope))
+	macHex := hex.EncodeToString(h.Sum(nil))
+
+	return fmt.Sprintf("xenv:%s:%s:%s:%s\n", vaultVersion, ivHex, ctHex, macHex), nil
+}
+
+func atomicWrite(dest, content string) error {
+	tmp := dest + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dest)
+}
+
+// Get decrypts and returns the plaintext for one key.
+func Get(envName, key string) ([]byte, error) {
+	p, err := readParams(envName)
+	if err != nil {
+		return nil, err
+	}
+	pass, err := passphrase(envName)
+	if err != nil {
+		return nil, err
+	}
+	encKey, macKey, err := deriveKeys(pass, p.salt, p.iter)
+	if err != nil {
+		return nil, err
+	}
+	file := filepath.Join(root(), "envs", envName, key+valueExt)
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("no such key: %s", key)
+	}
+	return decryptEnvelope(string(data), encKey, macKey)
+}
+
+// Set encrypts plaintext and atomically writes it.
+// Reuses the env's existing salt and iter; only a fresh IV is generated.
+func Set(envName, key string, plaintext []byte) error {
+	p, err := readParams(envName)
+	if err != nil {
+		return err
+	}
+	pass, err := passphrase(envName)
+	if err != nil {
+		return err
+	}
+	encKey, macKey, err := deriveKeys(pass, p.salt, p.iter)
+	if err != nil {
+		return err
+	}
+	envDir := filepath.Join(root(), "envs", envName)
+	if info, err := os.Stat(envDir); err != nil || !info.IsDir() {
+		return fmt.Errorf("no env directory: %s", envDir)
+	}
+	envelope, err := encryptEnvelope(plaintext, encKey, macKey)
+	if err != nil {
+		return err
+	}
+	return atomicWrite(filepath.Join(envDir, key+valueExt), envelope)
+}
+
 // Load returns a map of every variable in the named env to its decrypted bytes.
 func Load(envName string) (map[string][]byte, error) {
 	p, err := readParams(envName)
@@ -213,26 +305,3 @@ func Load(envName string) (map[string][]byte, error) {
 	}
 	return out, nil
 }
-
-// DecryptOne returns the plaintext for a single key.
-func DecryptOne(envName, key string) ([]byte, error) {
-	p, err := readParams(envName)
-	if err != nil {
-		return nil, err
-	}
-	pass, err := passphrase(envName)
-	if err != nil {
-		return nil, err
-	}
-	encKey, macKey, err := deriveKeys(pass, p.salt, p.iter)
-	if err != nil {
-		return nil, err
-	}
-	file := filepath.Join(root(), "envs", envName, key+valueExt)
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return nil, fmt.Errorf("no such key: %s", key)
-	}
-	return decryptEnvelope(string(data), encKey, macKey)
-}
-

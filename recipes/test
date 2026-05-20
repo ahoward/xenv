@@ -1,0 +1,153 @@
+#!/bin/sh
+# recipes/test — rigorous round-trip + tamper-detection assertions for every recipe.
+#
+# Each recipe is exercised in an isolated copy of the demo vault. Asserts:
+#   1. `get production HELLO` returns "world" (exact bytes)
+#   2. `get production DATABASE_URL` returns "postgres://localhost/demo"
+#   3. `load production` includes every known key
+#   4. `set production NEWKEY=v` writes a value that the canonical xenv
+#      shell tool can decrypt back to "v" (cross-tool round-trip)
+#   5. A tampered .value.enc causes `get` to error (MAC failure)
+#
+# Exit 0 on all pass, non-zero on any failure. CI runs this.
+
+set -eu
+HERE=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$HERE/.." && pwd)
+XENV_BIN="$REPO/bin/xenv"
+
+DEMO_KEY='demo-key-for-recipes-NOT-FOR-REAL-USE'
+
+PASS=0
+FAIL=0
+SKIP=0
+
+red()    { printf '\033[31m%s\033[0m\n' "$*"; }
+green()  { printf '\033[32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
+
+assert() {
+  msg=$1; expected=$2; actual=$3
+  if [ "$expected" = "$actual" ]; then
+    green "  ok    $msg"
+    PASS=$((PASS + 1))
+  else
+    red   "  FAIL  $msg"
+    red   "          expected: $(printf '%s' "$expected" | head -c 200)"
+    red   "          actual:   $(printf '%s' "$actual" | head -c 200)"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+exercise() {
+  name=$1; shift
+  printf '%s\n' "$name"
+
+  # isolated copy of the demo vault so set/tamper don't leak across recipes
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/xenv-recipes.XXXXXXXX")
+  trap "rm -rf '$tmp'" EXIT
+  cp -r "$HERE/xenv" "$tmp/xenv"
+  export XENV_ROOT="$tmp/xenv"
+  export XENV_KEY_PRODUCTION="$DEMO_KEY"
+
+  # ── get HELLO
+  out=$("$@" get production HELLO 2>&1) || {
+    red "  FAIL  $name get HELLO errored: $out"
+    FAIL=$((FAIL + 1)); return
+  }
+  assert "$name get HELLO" "world" "$out"
+
+  # ── get DATABASE_URL
+  out=$("$@" get production DATABASE_URL 2>&1) || {
+    red "  FAIL  $name get DATABASE_URL errored: $out"
+    FAIL=$((FAIL + 1)); return
+  }
+  assert "$name get DATABASE_URL" "postgres://localhost/demo" "$out"
+
+  # ── load produces all four known keys
+  all=$("$@" load production 2>&1) || {
+    red "  FAIL  $name load errored: $all"
+    FAIL=$((FAIL + 1)); return
+  }
+  for needle in 'APP_ENV=production' 'HELLO=world' 'DATABASE_URL=postgres://localhost/demo' 'GREETING=hi from xenv recipes'; do
+    if printf '%s\n' "$all" | grep -qF "$needle"; then
+      green "  ok    $name load contains $needle"
+      PASS=$((PASS + 1))
+    else
+      red   "  FAIL  $name load missing $needle"
+      FAIL=$((FAIL + 1))
+    fi
+  done
+
+  # ── set + cross-tool decrypt: write with the recipe, decrypt with xenv(1)
+  "$@" set production CROSSCHECK "from $name" >/dev/null 2>&1 || {
+    red "  FAIL  $name set errored"
+    FAIL=$((FAIL + 1)); return
+  }
+  # Use the canonical shell tool to decrypt what the recipe just wrote.
+  cross=$(cd "$tmp" && XENV_KEY_PRODUCTION="$DEMO_KEY" "$XENV_BIN" get production CROSSCHECK 2>&1)
+  assert "$name set+xenv cross-decrypt" "from $name" "$cross"
+
+  # ── tamper rejection: flip the last hex char of HELLO's MAC
+  orig=$(cat "$XENV_ROOT/envs/production/HELLO.value.enc")
+  tampered=$(printf '%s' "$orig" | awk '{ print substr($0, 1, length($0)-1) (substr($0, length($0)) == "0" ? "1" : "0") }')
+  printf '%s\n' "$tampered" > "$XENV_ROOT/envs/production/HELLO.value.enc"
+  if "$@" get production HELLO >/dev/null 2>&1; then
+    red "  FAIL  $name accepted tampered envelope"
+    FAIL=$((FAIL + 1))
+  else
+    green "  ok    $name rejects tampered envelope"
+    PASS=$((PASS + 1))
+  fi
+
+  rm -rf "$tmp"
+  trap - EXIT
+}
+
+if command -v python3 >/dev/null 2>&1; then
+  exercise "pythong" python3 "$HERE/pythong/xenv.py"
+else
+  yellow "skip: python3 not found"
+  SKIP=$((SKIP + 1))
+fi
+
+if command -v node >/dev/null 2>&1; then
+  exercise "node" node "$HERE/node/xenv.js"
+else
+  yellow "skip: node not found"
+  SKIP=$((SKIP + 1))
+fi
+
+if command -v go >/dev/null 2>&1; then
+  ( cd "$HERE/go" && go mod tidy >/dev/null 2>&1 ) || true
+  exercise "go" sh -c 'cd "$0" && go run ./main "$@"' "$HERE/go"
+else
+  yellow "skip: go not found"
+  SKIP=$((SKIP + 1))
+fi
+
+if [ -x "$HERE/rust/target/release/xenv-recipe" ]; then
+  exercise "rust" "$HERE/rust/target/release/xenv-recipe"
+elif command -v cargo >/dev/null 2>&1; then
+  ( cd "$HERE/rust" && cargo build --release --quiet )
+  exercise "rust" "$HERE/rust/target/release/xenv-recipe"
+else
+  yellow "skip: cargo not found"
+  SKIP=$((SKIP + 1))
+fi
+
+if command -v php >/dev/null 2>&1; then
+  exercise "gemini (php)" php "$HERE/gemini/xenv.php"
+else
+  yellow "skip: php not found"
+  SKIP=$((SKIP + 1))
+fi
+
+echo
+if [ "$FAIL" -eq 0 ]; then
+  green "$PASS passed, 0 failed, $SKIP skipped"
+  exit 0
+else
+  red   "$PASS passed, $FAIL failed, $SKIP skipped"
+  exit 1
+fi

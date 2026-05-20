@@ -655,10 +655,11 @@ functions, each ~15 lines:
 Read those three functions and you've read xenv. No proprietary
 format, no library lock-in, no runtime.
 
-The upstream repo ships reference read-only loaders for Python,
-Node, and Go at <https://github.com/ahoward/xenv/tree/main/loaders>,
-all generated from a single `loaders/AGENT_PROMPT.md` you can feed
-to any coding agent.
+The upstream repo ships reference recipes at
+<https://github.com/ahoward/xenv/tree/main/recipes>, all generated
+from a single `recipes/README.md` you can feed to any coding agent.
+Python, Node, Go, Rust, and a PHP recipe built by Gemini from that
+README alone.
 
 If this tool ever disappeared, your data wouldn't.
 

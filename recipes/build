@@ -1,0 +1,38 @@
+#!/bin/sh
+# recipes/build — compile / install deps for every recipe.
+# Idempotent. Skips a recipe if its toolchain isn't installed.
+
+set -eu
+HERE=$(cd "$(dirname "$0")" && pwd)
+
+echo "==> recipes/build"
+
+if command -v python3 >/dev/null 2>&1; then
+  echo "  pythong: no build step (interpreted, stdlib + openssl(1))"
+else
+  echo "  pythong: skipped — python3 not found"
+fi
+
+if command -v node >/dev/null 2>&1; then
+  echo "  node:    no build step (interpreted, zero deps)"
+else
+  echo "  node:    skipped — node not found"
+fi
+
+if command -v go >/dev/null 2>&1; then
+  echo "  go:      prefetching x/crypto"
+  ( cd "$HERE/go" && go mod tidy >/dev/null 2>&1 ) || true
+  echo "  go:      ok"
+else
+  echo "  go:      skipped — go not found"
+fi
+
+if command -v cargo >/dev/null 2>&1; then
+  echo "  rust:    cargo build --release"
+  ( cd "$HERE/rust" && cargo build --release --quiet )
+  echo "  rust:    ok ($HERE/rust/target/release/xenv-recipe)"
+else
+  echo "  rust:    skipped — cargo not found"
+fi
+
+echo "==> done. run recipes/try for a demo, recipes/test for assertions."

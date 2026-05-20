@@ -23,9 +23,9 @@ jobs:
       - name: run tests under /usr/bin/dash
         run: SHELL_BIN=/usr/bin/dash test/run.sh
 
-  loaders:
+  recipes:
     runs-on: ubuntu-latest
-    name: loader round-trip tests (python, node, go, rust)
+    name: recipe round-trip tests (python, node, go, rust, php)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,6 +34,8 @@ jobs:
         with: { node-version: '20' }
       - uses: actions/setup-go@v5
         with: { go-version: '1.22' }
+      - name: install php (for the gemini-built recipe)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq php-cli
       # Rust is preinstalled on ubuntu-latest via rustup; no setup needed.
       - name: cache cargo
         uses: actions/cache@v4
@@ -41,9 +43,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            loaders/rust/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('loaders/rust/Cargo.toml') }}
-      - name: prefetch go deps
-        run: cd loaders/go && go mod tidy
-      - name: run loader rig
-        run: loaders/test.sh
+            recipes/rust/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('recipes/rust/Cargo.toml') }}
+      - name: build recipes
+        run: recipes/build
+      - name: run recipe test rig
+        run: recipes/test

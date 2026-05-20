@@ -1,11 +1,12 @@
-"""xenv loader for Python — read-only, stdlib + openssl(1).
+"""xenv recipe for Python — minimal but complete (get / set / load).
 
-Reference implementation generated from ../AGENT_PROMPT.md. Reads the
-xenv on-disk format and returns decrypted values.
+Reference implementation generated from ../README.md. Reads and writes
+the xenv on-disk format. No rotation, no init, no edit — those are the
+shell tool's job. This is what an app needs to use xenv at runtime.
 
 Crypto: stdlib hashlib.pbkdf2_hmac + hmac. AES-CBC via openssl(1)
-subprocess, because Python's stdlib has no AES. If your project
-already depends on `cryptography`, you could swap the subprocess for
+subprocess, because Python's stdlib has no AES. If your project already
+depends on `cryptography`, swap the subprocess for
 `cryptography.hazmat.primitives.ciphers.Cipher` and stay pure-Python.
 """
 
@@ -14,6 +15,7 @@ import hashlib
 import hmac
 import os
 import re
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -112,6 +114,56 @@ def _decrypt_envelope(envelope: str, enc_key: bytes, mac_key: bytes) -> bytes:
     return proc.stdout
 
 
+def _encrypt_envelope(plaintext: bytes, enc_key: bytes, mac_key: bytes) -> str:
+    iv = secrets.token_bytes(16)
+    iv_hex = iv.hex()
+
+    # encrypt via openssl(1)
+    proc = subprocess.run(
+        ["openssl", "enc", "-aes-256-cbc", "-K", enc_key.hex(), "-iv", iv_hex],
+        input=plaintext,
+        capture_output=True,
+        check=True,
+    )
+    ct_hex = proc.stdout.hex()
+
+    mac_scope = f"{VAULT_VERSION}:{iv_hex}:{ct_hex}".encode("ascii")
+    mac_hex = hmac.new(mac_key, mac_scope, hashlib.sha256).hexdigest()
+
+    return f"xenv:{VAULT_VERSION}:{iv_hex}:{ct_hex}:{mac_hex}\n"
+
+
+def _atomic_write(path: Path, content: str):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+
+def get(env_name: str, key: str) -> bytes:
+    """Decrypt and return the plaintext bytes for one key."""
+    iters, salt = _read_params(env_name)
+    enc_key, mac_key = _derive_keys(_passphrase(env_name), salt, iters)
+    f = _root() / "envs" / env_name / (key + VALUE_EXT)
+    if not f.is_file():
+        raise FileNotFoundError(f"no such key: {key}")
+    return _decrypt_envelope(f.read_text(), enc_key, mac_key)
+
+
+def set(env_name: str, key: str, plaintext: bytes):
+    """Encrypt and atomically write one value. Reuses the env's existing
+    salt and iter; only a fresh IV is generated."""
+    if isinstance(plaintext, str):
+        plaintext = plaintext.encode("utf-8")
+    iters, salt = _read_params(env_name)
+    enc_key, mac_key = _derive_keys(_passphrase(env_name), salt, iters)
+    envelope = _encrypt_envelope(plaintext, enc_key, mac_key)
+    env_dir = _root() / "envs" / env_name
+    if not env_dir.is_dir():
+        raise FileNotFoundError(f"no env directory: {env_dir}")
+    _atomic_write(env_dir / (key + VALUE_EXT), envelope)
+
+
 def load(env_name: str) -> dict:
     """Return {KEY: plaintext-bytes} for every value in the named env."""
     iters, salt = _read_params(env_name)
@@ -126,25 +178,22 @@ def load(env_name: str) -> dict:
     return out
 
 
-def decrypt_one(env_name: str, key: str) -> bytes:
-    """Decrypt one named value; raises if it doesn't exist."""
-    iters, salt = _read_params(env_name)
-    enc_key, mac_key = _derive_keys(_passphrase(env_name), salt, iters)
-    f = _root() / "envs" / env_name / (key + VALUE_EXT)
-    if not f.is_file():
-        raise FileNotFoundError(f"no such key: {key}")
-    return _decrypt_envelope(f.read_text(), enc_key, mac_key)
-
-
 def _main(argv):
-    if len(argv) == 2:
-        sys.stdout.buffer.write(decrypt_one(argv[0], argv[1]))
+    if not argv:
+        print("usage: xenv.py {get|set|load} <env> [<key>] [<value>]", file=sys.stderr)
+        return 2
+    verb = argv[0]
+    if verb == "get" and len(argv) == 3:
+        sys.stdout.buffer.write(get(argv[1], argv[2]))
         return 0
-    if len(argv) == 1:
-        for k, v in load(argv[0]).items():
+    if verb == "set" and len(argv) == 4:
+        set(argv[1], argv[2], argv[3].encode("utf-8"))
+        return 0
+    if verb == "load" and len(argv) == 2:
+        for k, v in load(argv[1]).items():
             sys.stdout.buffer.write(k.encode("ascii") + b"=" + v + b"\n")
         return 0
-    print("usage: xenv.py <env> [<key>]", file=sys.stderr)
+    print(f"usage: xenv.py {{get|set|load}} <env> [<key>] [<value>]", file=sys.stderr)
     return 2
 
 

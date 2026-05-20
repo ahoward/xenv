@@ -1,17 +1,19 @@
-// xenv loader for Node — read-only, pure stdlib.
+// xenv recipe for Node — minimal but complete (get / set / load).
 //
-// Reference implementation generated from ../AGENT_PROMPT.md. Reads
-// the xenv on-disk format and returns decrypted values. Zero deps —
-// only the built-in `crypto`, `fs`, `path`, `process` modules.
+// Reference implementation generated from ../README.md. Reads and
+// writes the xenv on-disk format. Zero deps — only the built-in
+// `crypto`, `fs`, `path`, `process` modules.
 //
 // Usage as a module:
-//   const { load, decryptOne } = require('./xenv.js');
-//   const config = load('production');           // → { KEY: Buffer, ... }
-//   const apiKey = decryptOne('production', 'API_KEY');
+//   const { get, set, load } = require('./xenv.js');
+//   const v = get('production', 'API_KEY');                     // Buffer
+//   set('production', 'NEW_KEY', Buffer.from('hello'));
+//   const all = load('production');                              // { KEY: Buffer }
 //
-// Usage as a CLI (for loaders/test.sh):
-//   node xenv.js production              # prints KEY=value lines
-//   node xenv.js production API_KEY      # prints just that value
+// Usage as a CLI:
+//   node xenv.js get  <env> <key>           # prints plaintext
+//   node xenv.js set  <env> <key> <value>   # writes encrypted value
+//   node xenv.js load <env>                 # prints KEY=value lines
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -111,6 +113,44 @@ function decryptEnvelope(envelope, encKey, macKey) {
   ]);
 }
 
+function encryptEnvelope(plaintext, encKey, macKey) {
+  const iv = crypto.randomBytes(16);
+  const ivHex = iv.toString('hex');
+  const cipher = crypto.createCipheriv('aes-256-cbc', encKey, iv);
+  const ct = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const ctHex = ct.toString('hex');
+  const macScope = `${VAULT_VERSION}:${ivHex}:${ctHex}`;
+  const macHex = crypto
+    .createHmac('sha256', macKey)
+    .update(macScope, 'ascii')
+    .digest('hex');
+  return `xenv:${VAULT_VERSION}:${ivHex}:${ctHex}:${macHex}\n`;
+}
+
+function atomicWrite(dest, content) {
+  const tmp = dest + '.tmp';
+  fs.writeFileSync(tmp, content, { mode: 0o600 });
+  fs.renameSync(tmp, dest);
+}
+
+function get(envName, key) {
+  const { iter, salt } = readParams(envName);
+  const { encKey, macKey } = deriveKeys(passphrase(envName), salt, iter);
+  const file = path.join(root(), 'envs', envName, key + VALUE_EXT);
+  if (!fs.existsSync(file)) throw new Error(`no such key: ${key}`);
+  return decryptEnvelope(fs.readFileSync(file, 'utf8'), encKey, macKey);
+}
+
+function set(envName, key, plaintext) {
+  if (typeof plaintext === 'string') plaintext = Buffer.from(plaintext, 'utf8');
+  const { iter, salt } = readParams(envName);
+  const { encKey, macKey } = deriveKeys(passphrase(envName), salt, iter);
+  const envDir = path.join(root(), 'envs', envName);
+  if (!fs.existsSync(envDir)) throw new Error(`no env directory: ${envDir}`);
+  const envelope = encryptEnvelope(plaintext, encKey, macKey);
+  atomicWrite(path.join(envDir, key + VALUE_EXT), envelope);
+}
+
 function load(envName) {
   const { iter, salt } = readParams(envName);
   const { encKey, macKey } = deriveKeys(passphrase(envName), salt, iter);
@@ -125,29 +165,30 @@ function load(envName) {
   return out;
 }
 
-function decryptOne(envName, key) {
-  const { iter, salt } = readParams(envName);
-  const { encKey, macKey } = deriveKeys(passphrase(envName), salt, iter);
-  const file = path.join(root(), 'envs', envName, key + VALUE_EXT);
-  if (!fs.existsSync(file)) throw new Error(`no such key: ${key}`);
-  return decryptEnvelope(fs.readFileSync(file, 'utf8'), encKey, macKey);
-}
-
-module.exports = { load, decryptOne };
+module.exports = { get, set, load };
 
 if (require.main === module) {
-  const [envName, key] = process.argv.slice(2);
-  if (!envName) {
-    process.stderr.write('usage: node xenv.js <env> [<key>]\n');
-    process.exit(2);
-  }
-  if (key) {
-    process.stdout.write(decryptOne(envName, key));
-  } else {
-    for (const [k, v] of Object.entries(load(envName))) {
-      process.stdout.write(`${k}=`);
-      process.stdout.write(v);
-      process.stdout.write('\n');
+  const args = process.argv.slice(2);
+  const [verb, envName, key, value] = args;
+  const usage = 'usage: node xenv.js {get|set|load} <env> [<key>] [<value>]';
+
+  try {
+    if (verb === 'get' && envName && key && args.length === 3) {
+      process.stdout.write(get(envName, key));
+    } else if (verb === 'set' && envName && key && value !== undefined && args.length === 4) {
+      set(envName, key, value);
+    } else if (verb === 'load' && envName && args.length === 2) {
+      for (const [k, v] of Object.entries(load(envName))) {
+        process.stdout.write(`${k}=`);
+        process.stdout.write(v);
+        process.stdout.write('\n');
+      }
+    } else {
+      process.stderr.write(usage + '\n');
+      process.exit(2);
     }
+  } catch (e) {
+    process.stderr.write(`xenv: ${e.message}\n`);
+    process.exit(1);
   }
 }

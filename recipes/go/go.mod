@@ -1,4 +1,4 @@
-module xenv-loader-go
+module xenv-recipe-go
 
 go 1.21
 

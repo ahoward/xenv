@@ -1,31 +1,33 @@
-//! Read-only loader for the xenv encrypted-environment format.
+//! Minimal-but-complete recipe for the xenv encrypted-environment format.
 //!
-//! Reference implementation generated from `../AGENT_PROMPT.md`. Reads
-//! the on-disk format and returns decrypted values. No write side.
+//! Three operations: `get`, `set`, `load`. Reads from and writes to the
+//! on-disk format. No rotation, no init — those are the shell tool's job.
 //!
 //! Crypto: RustCrypto crates — `aes` + `cbc` + `hmac` + `sha2` + `pbkdf2`.
 //! Rust has no stdlib crypto, but these are the universally-accepted
-//! choice for the primitives we need (PBKDF2-SHA256, HMAC-SHA256,
-//! AES-256-CBC). All pure Rust, all well-audited.
+//! choice. Random IVs via `/dev/urandom` (POSIX) to avoid adding `rand`.
 //!
 //! Usage as a library:
 //!
 //! ```no_run
-//! let env = xenv::load("production").unwrap();
-//! let api_key: &Vec<u8> = env.get("API_KEY").unwrap();
+//! let v = xenv::get("production", "API_KEY").unwrap();
+//! xenv::set("production", "NEW_KEY", b"hello").unwrap();
+//! let all = xenv::load("production").unwrap();
 //! ```
 
 use aes::cipher::block_padding::Pkcs7;
-use aes::cipher::{BlockDecryptMut, KeyIvInit};
+use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use hmac::{Hmac, Mac};
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
+type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type HmacSha256 = Hmac<Sha256>;
 
 const VAULT_VERSION: &str = "v3";
@@ -159,6 +161,21 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push_str(&format!("{:02x}", b));
+    }
+    s
+}
+
+fn random_bytes(n: usize) -> Result<Vec<u8>, Error> {
+    let mut buf = vec![0u8; n];
+    let mut f = fs::File::open("/dev/urandom")?;
+    f.read_exact(&mut buf)?;
+    Ok(buf)
+}
+
 fn derive_keys(pass: &str, salt: &[u8], iter: u32) -> ([u8; 32], [u8; 32]) {
     let mut out = [0u8; 64];
     pbkdf2_hmac::<Sha256>(pass.as_bytes(), salt, iter, &mut out);
@@ -217,6 +234,83 @@ fn decrypt_envelope(
     Ok(plain.to_vec())
 }
 
+fn encrypt_envelope(
+    plaintext: &[u8],
+    enc_key: &[u8; 32],
+    mac_key: &[u8; 32],
+) -> Result<String, Error> {
+    let iv_vec = random_bytes(16)?;
+    let iv: [u8; 16] = iv_vec.as_slice().try_into().unwrap();
+    let iv_hex = hex_encode(&iv);
+
+    // AES-256-CBC encrypt with PKCS#7 padding.
+    let cipher = Aes256CbcEnc::new(enc_key.into(), &iv.into());
+    let mut buf = vec![0u8; plaintext.len() + 16]; // room for padding
+    let ct = cipher
+        .encrypt_padded_b2b_mut::<Pkcs7>(plaintext, &mut buf)
+        .map_err(|e| Error::Crypto(e.to_string()))?;
+    let ct_hex = hex_encode(ct);
+
+    let mac_scope = format!("{VAULT_VERSION}:{iv_hex}:{ct_hex}");
+    let mut hmac = <HmacSha256 as Mac>::new_from_slice(mac_key)
+        .map_err(|e| Error::Crypto(e.to_string()))?;
+    hmac.update(mac_scope.as_bytes());
+    let mac_hex = hex_encode(&hmac.finalize().into_bytes());
+
+    Ok(format!(
+        "xenv:{VAULT_VERSION}:{iv_hex}:{ct_hex}:{mac_hex}\n"
+    ))
+}
+
+fn atomic_write(dest: &Path, content: &str) -> Result<(), Error> {
+    let tmp = dest.with_extension("enc.tmp");
+    {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(content.as_bytes())?;
+    }
+    // Best-effort mode 600 — POSIX only.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+    }
+    fs::rename(&tmp, dest)?;
+    Ok(())
+}
+
+/// Decrypt and return the plaintext bytes for one key.
+pub fn get(env_name: &str, key: &str) -> Result<Vec<u8>, Error> {
+    let p = read_params(env_name)?;
+    let (enc_key, mac_key) = derive_keys(&passphrase(env_name)?, &p.salt, p.iter);
+
+    let file = root()
+        .join("envs")
+        .join(env_name)
+        .join(format!("{key}{VALUE_EXT}"));
+    if !Path::new(&file).is_file() {
+        return Err(Error::NotFound(format!("no such key: {key}")));
+    }
+    let envelope = fs::read_to_string(&file)?;
+    decrypt_envelope(&envelope, &enc_key, &mac_key)
+}
+
+/// Encrypt plaintext and atomically write it.
+/// Reuses the env's existing salt and iter; only a fresh IV is generated.
+pub fn set(env_name: &str, key: &str, plaintext: &[u8]) -> Result<(), Error> {
+    let p = read_params(env_name)?;
+    let (enc_key, mac_key) = derive_keys(&passphrase(env_name)?, &p.salt, p.iter);
+    let env_dir = root().join("envs").join(env_name);
+    if !env_dir.is_dir() {
+        return Err(Error::NotFound(format!(
+            "no env directory: {}",
+            env_dir.display()
+        )));
+    }
+    let envelope = encrypt_envelope(plaintext, &enc_key, &mac_key)?;
+    let dest = env_dir.join(format!("{key}{VALUE_EXT}"));
+    atomic_write(&dest, &envelope)
+}
+
 /// Return a map of every variable in the named env to its decrypted bytes.
 pub fn load(env_name: &str) -> Result<BTreeMap<String, Vec<u8>>, Error> {
     let p = read_params(env_name)?;
@@ -235,20 +329,4 @@ pub fn load(env_name: &str) -> Result<BTreeMap<String, Vec<u8>>, Error> {
         out.insert(key, decrypt_envelope(&envelope, &enc_key, &mac_key)?);
     }
     Ok(out)
-}
-
-/// Decrypt one named value; errors if it doesn't exist.
-pub fn decrypt_one(env_name: &str, key: &str) -> Result<Vec<u8>, Error> {
-    let p = read_params(env_name)?;
-    let (enc_key, mac_key) = derive_keys(&passphrase(env_name)?, &p.salt, p.iter);
-
-    let file = root()
-        .join("envs")
-        .join(env_name)
-        .join(format!("{key}{VALUE_EXT}"));
-    if !Path::new(&file).is_file() {
-        return Err(Error::NotFound(format!("no such key: {key}")));
-    }
-    let envelope = fs::read_to_string(&file)?;
-    decrypt_envelope(&envelope, &enc_key, &mac_key)
 }

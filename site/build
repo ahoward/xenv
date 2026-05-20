@@ -48,8 +48,8 @@ Zero lock-in. Git- and agent-friendly.
 > the passphrase lives outside the repo in your keychain / pass / a file
 > under ~/.config/xenv/projects/<id>/keys/. Agents that run `git add .`
 > can't leak what isn't there. The format is documented in
-> loaders/AGENT_PROMPT.md so any coding agent can write its own loader
-> in any language.
+> recipes/README.md so any coding agent can build its own minimal-but-
+> complete recipe in any language.
 
 ## install
 

@@ -1,0 +1,72 @@
+#!/bin/sh
+# recipes/try — demo-run every recipe against ./xenv.
+#
+# Shows each recipe's output for `get HELLO`, `get DATABASE_URL`, and
+# `load production`. Visual proof that the recipes work.
+#
+# Uses the canned demo passphrase published in recipes/README.md.
+# That passphrase is DEMO ONLY and must never appear in a real project.
+
+set -eu
+HERE=$(cd "$(dirname "$0")" && pwd)
+
+export XENV_KEY_PRODUCTION='demo-key-for-recipes-NOT-FOR-REAL-USE'
+export XENV_ROOT="$HERE/xenv"
+
+red()    { printf '\033[31m%s\033[0m\n' "$*"; }
+green()  { printf '\033[32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
+bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
+
+run_recipe() {
+  name=$1
+  shift
+  bold "── $name ──"
+
+  printf '  get HELLO         → '
+  "$@" get production HELLO
+  echo
+
+  printf '  get DATABASE_URL  → '
+  "$@" get production DATABASE_URL
+  echo
+
+  echo '  load production   →'
+  "$@" load production | sed 's/^/    /'
+  echo
+}
+
+if command -v python3 >/dev/null 2>&1; then
+  run_recipe "pythong" python3 "$HERE/pythong/xenv.py"
+else
+  yellow "skip: python3"
+fi
+
+if command -v node >/dev/null 2>&1; then
+  run_recipe "node" node "$HERE/node/xenv.js"
+else
+  yellow "skip: node"
+fi
+
+if command -v go >/dev/null 2>&1; then
+  ( cd "$HERE/go" && go mod tidy >/dev/null 2>&1 ) || true
+  run_recipe "go" sh -c 'cd "$0" && go run ./main "$@"' "$HERE/go"
+else
+  yellow "skip: go"
+fi
+
+if [ -x "$HERE/rust/target/release/xenv-recipe" ]; then
+  run_recipe "rust" "$HERE/rust/target/release/xenv-recipe"
+elif command -v cargo >/dev/null 2>&1; then
+  yellow "rust: binary not built — run recipes/build first"
+else
+  yellow "skip: cargo"
+fi
+
+if command -v php >/dev/null 2>&1; then
+  run_recipe "gemini (php)" php "$HERE/gemini/xenv.php"
+else
+  yellow "skip: php"
+fi
+
+green "==> demo complete."

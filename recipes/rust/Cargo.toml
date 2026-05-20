@@ -1,8 +1,8 @@
 [package]
-name = "xenv-loader"
+name = "xenv-recipe"
 version = "0.1.0"
 edition = "2021"
-description = "Read-only loader for the xenv encrypted-environment format. Generated from ../AGENT_PROMPT.md."
+description = "Minimal-but-complete recipe for the xenv encrypted-environment format. Generated from ../README.md."
 publish = false
 
 [lib]
@@ -10,8 +10,8 @@ name = "xenv"
 path = "src/lib.rs"
 
 [[bin]]
-name = "xenv-loader"
-path = "src/bin/xenv-loader.rs"
+name = "xenv-recipe"
+path = "src/bin/xenv-recipe.rs"
 
 # All five are RustCrypto crates — the de-facto standard for crypto
 # primitives in Rust. They are NOT in std (Rust has no stdlib crypto)
