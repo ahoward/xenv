@@ -207,7 +207,7 @@ Passphrase resolution, first hit wins:
 
 A dev tool for one human or a small trusted team. Protects against accidental commit of plaintext (no plaintext on disk), losing a laptop (passphrase outside the repo), and AI agents that `git add .` everything.
 
-Does NOT protect against same-user attackers, an attacker who has the passphrase, or timing side-channels in the MAC compare (not constant-time).
+Does NOT protect against same-user attackers or an attacker who has the passphrase. MAC verification is constant-time: each side gets HMAC'd under a fresh per-call key before the compare, so the timing of the byte-by-byte string compare correlates with random data, not the real MAC.
 
 ```
 KDF      PBKDF2-SHA256, 200k iterations (raise it in frontmatter)

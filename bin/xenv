@@ -323,7 +323,16 @@ EOF
     | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$mac_key_hex" -binary 2>/dev/null \
     | hex_encode)
 
-  [ "$mac_hex" = "$expected" ] || { err "MAC verification failed — wrong key or tampered vault"; return 1; }
+  # Constant-time MAC verification: don't compare the MAC hexes directly
+  # (shell's `=` short-circuits on first byte differ, leaking a timing
+  # side-channel). Instead, HMAC each side under a fresh per-call key
+  # and compare those — the attacker now sees timing on values they
+  # can't predict, so no byte-by-byte bisection is possible. Same trick
+  # the formal HMAC-verify literature recommends.
+  cmp_key=$(openssl rand -hex 32)
+  mac_a=$(printf '%s' "$mac_hex"  | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$cmp_key" -binary 2>/dev/null | hex_encode)
+  mac_b=$(printf '%s' "$expected" | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$cmp_key" -binary 2>/dev/null | hex_encode)
+  [ "$mac_a" = "$mac_b" ] || { err "MAC verification failed — wrong key or tampered vault"; return 1; }
 
   printf '%s' "$ct_hex" | hex_decode \
     | openssl enc -d -aes-256-cbc -K "$enc_key_hex" -iv "$iv_hex" 2>/dev/null
