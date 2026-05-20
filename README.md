@@ -1,5 +1,7 @@
 # xenv
 
+## TL;DR;
+
 encrypted environment variables. one file per key. every file safe to commit.
 
 posix. git- and agent-friendly. zero lock-in. simple secrets for discerning developers.
