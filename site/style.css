@@ -119,12 +119,17 @@ th, td {
 }
 th { color: var(--accent); }
 
-/* blockquotes — rare here but support them */
+/* blockquotes — used as man-page-style hanging-indent for term/def pairs
+   (COMMANDS, ENVIRONMENT, FILES sections). Not for quoted prose, so we
+   don't dim them; they ARE the content. */
 blockquote {
-  border-left: 2px solid var(--rule);
-  margin: 1rem 0;
-  padding: 0.25rem 1rem;
-  color: var(--fg-dim);
+  margin: 0.25rem 0 0.9rem 0;
+  padding: 0 0 0 1.5rem;
+  border-left: none;
+  color: var(--fg);
+}
+blockquote p {
+  margin: 0;
 }
 
 /* footer */
