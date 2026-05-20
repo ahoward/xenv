@@ -95,7 +95,7 @@ fi
 
 a few details worth knowing:
 
-- **`xenv get` is silent on success.** stdout gets exactly the decrypted bytes, no trailing newline added.
+- **`xenv get` is silent on success.** in a pipe / redirect / `$()`, stdout is the exact decrypted bytes — no trailing newline added, so scripting is precise. interactive at a terminal: one trailing newline is appended if the value didn't already end in one, so your next shell prompt isn't glued to the value. same auto-detection as `ls --color=auto`, `git`, `jq`.
 - **`xenv set KEY` (stdin form) strips a trailing newline** (because `value=$(cat)`). if you need one literally, pipe in two: `printf 'foo\n\n' | xenv set prod KEY`.
 - **`xenv edit` uses `$VISUAL`, then `$EDITOR`, then `vi`.** the plaintext temp file is created with `umask 077` in `${TMPDIR:-/tmp}`, with a `trap` on `EXIT INT TERM HUP` so `^C` cleans up.
 - **`xenv rotate` is all-or-nothing.** every value is decrypted to a tmpfs stash first; new params + re-encryption only happen if every decrypt succeeded.

@@ -525,6 +525,23 @@ atomic_write() {
   mv "$tmp" "$dest"
 }
 
+# tty_finish — pass stdin to stdout. if FD 1 is a tty, guarantee at
+# least one trailing newline so the next shell prompt isn't glued to
+# the value; if it's a pipe / redirect, pass bytes verbatim so
+# `db=$(xenv get prod URL)` still works exactly.
+#
+# We rely on awk's record model: awk reads records separated by RS
+# (default \n) and `print` appends ORS (default \n). Input ending in
+# \n round-trips to one \n (the trailing \n is the separator, not
+# part of the last record); input not ending in \n gains exactly one.
+tty_finish() {
+  if [ -t 1 ]; then
+    awk '{ print }'
+  else
+    cat
+  fi
+}
+
 # encrypt a value and write it to xenv/<env>/KEY.value.enc atomically
 write_value() {
   env_name=$1
@@ -942,7 +959,24 @@ $(keys_for_env "$env_name")
 EOF
   [ -n "$enc_key" ] || exit 1
 
-  decrypt_value "$enc_key" "$mac_key" < "$f" || die "decrypt failed"
+  # Decrypt to a tmpfile first so we can:
+  #   (a) reliably catch decrypt_value's exit code (a pipe or multi-
+  #       command $() would mask MAC failures behind a 0 from awk),
+  #   (b) preserve plaintext bytes exactly — no shell stripping of
+  #       trailing newlines via command substitution.
+  umask 077
+  tmp=$(mktemp "${TMPDIR:-/tmp}/xenv-get.XXXXXXXX") || die "mktemp failed"
+  trap 'rm -f "$tmp"' EXIT INT TERM HUP
+
+  decrypt_value "$enc_key" "$mac_key" < "$f" > "$tmp" || die "decrypt failed"
+
+  # interactive terminal: ensure one trailing newline so the next
+  # prompt isn't glued to the value. piped / redirected: exact bytes
+  # pass through, so `db=$(xenv get prod URL)` still works the same.
+  tty_finish < "$tmp"
+
+  rm -f "$tmp"
+  trap - EXIT INT TERM HUP
 }
 
 cmd_edit() {

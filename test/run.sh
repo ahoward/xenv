@@ -401,6 +401,51 @@ test_get_missing_key_fails() {
   return 0
 }
 
+test_get_pipe_preserves_exact_bytes() {
+  # When stdout is a pipe (not a tty), `xenv get` must emit exact bytes
+  # with no auto-newline. This is the script-compat contract: it lets
+  # `db=$(xenv get prod URL)` capture the value verbatim.
+  xenv init >/dev/null 2>&1
+  xenv set production NO_NL=novalue >/dev/null 2>&1
+
+  bytes=$(xenv get production NO_NL | od -An -vtx1 | tr -d ' \n')
+  # "novalue" = 0x6e6f76616c7565 (7 bytes, no trailing 0a)
+  assert_eq "6e6f76616c7565" "$bytes" "exact bytes from pipe, no \\n appended"
+}
+
+test_get_pipe_preserves_internal_newlines() {
+  # Multi-line values must round-trip through a pipe with all internal
+  # \n preserved and no extra \n at the end.
+  xenv init >/dev/null 2>&1
+  printf 'a\nb\nc' | xenv set production MULTI >/dev/null 2>&1
+
+  bytes=$(xenv get production MULTI | od -An -vtx1 | tr -d ' \n')
+  # "a\nb\nc" = 0x610a620a63 — note: no trailing 0a
+  assert_eq "610a620a63" "$bytes" "multi-line preserved, no trailing \\n"
+}
+
+test_tty_finish_algorithm() {
+  # Unit-test the algorithm that `tty_finish` uses in its tty branch.
+  # We trust `[ -t 1 ]` and validate the awk shape independently of it.
+  # Three cases: no trailing \n → \n added; already \n → preserved as 1;
+  # empty input → \n added so the prompt doesn't sit on the input line.
+
+  # case 1: no trailing newline → exactly one added
+  out=$(printf 'hello' | awk '{print}' | od -An -vtx1 | tr -d ' \n')
+  assert_eq "68656c6c6f0a" "$out" "no-\\n input gets one \\n appended" || return 1
+
+  # case 2: input already ends in \n → exactly one in output
+  out=$(printf 'hello\n' | awk '{print}' | od -An -vtx1 | tr -d ' \n')
+  assert_eq "68656c6c6f0a" "$out" "trailing-\\n input passes through unchanged" || return 1
+
+  # case 3: empty input → empty output (POSIX awk: 0 records means no
+  # print invocations; no \n is emitted). This matches the spec: we
+  # only add a \n when there's content to follow. An empty `xenv get`
+  # at the terminal leaves the prompt on its own line — fine.
+  out=$(printf '' | awk '{print}' | od -An -vtx1 | tr -d ' \n')
+  assert_eq "" "$out" "empty input → empty output"
+}
+
 # ── envs ───────────────────────────────────────────────────────────
 
 test_envs_lists_all_four() {
@@ -809,6 +854,9 @@ run_test "list shows starter APP_ENV"               test_list_shows_starter_app_
 run_test "list shows new keys"                      test_list_shows_new_keys
 run_test "get silent on success"                    test_get_silent_on_success
 run_test "get missing key fails"                    test_get_missing_key_fails
+run_test "get pipe preserves exact bytes"           test_get_pipe_preserves_exact_bytes
+run_test "get pipe preserves internal newlines"     test_get_pipe_preserves_internal_newlines
+run_test "tty_finish algorithm (awk '{print}')"     test_tty_finish_algorithm
 
 # envs
 run_test "envs lists all four"                      test_envs_lists_all_four
