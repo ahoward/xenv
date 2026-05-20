@@ -1,4 +1,10 @@
-/* xenv.sh — hacker monospace, dark */
+/* xenv.sh — hacker monospace.
+ *
+ * Default palette is dark (the project's identity). When the user's
+ * OS reports `prefers-color-scheme: light`, a paper-cream light
+ * palette takes over. No JS, no toggle, no FOUC — pure CSS media
+ * query. Trust the OS; it knows day from night.
+ */
 
 :root {
   --bg: #0d0d0d;
@@ -8,6 +14,18 @@
   --accent: #d4af37;
   --accent-dim: #8a7028;
   --rule: #2a2a2a;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #fbf9f3;          /* warm cream — paper feel */
+    --bg-soft: #f0ece2;     /* slightly darker cream for code blocks */
+    --fg: #1a1a1a;          /* near-black, ~15:1 on bg (WCAG AAA) */
+    --fg-dim: #6b685f;      /* warm gray for footer / secondary text */
+    --accent: #8a6f1f;      /* dark ochre — readable amber lineage */
+    --accent-dim: #b89530;  /* lighter amber for underlines / dim accents */
+    --rule: #d8d4c8;        /* warm rule lines */
+  }
 }
 
 * { box-sizing: border-box; }
