@@ -40,6 +40,9 @@ EOF
 cat > "$DIST/llms.txt" <<'EOF'
 # xenv — 🤖 the ENV for AI
 
+Encrypted, per-key, safe-to-commit env vars. POSIX. Zero dependencies.
+Zero lock-in. Git- and agent-friendly.
+
 > A pure-POSIX shell tool for per-key encrypted environment variables.
 > Every file in xenv/ is safe to commit by design — encrypted at rest,
 > the passphrase lives outside the repo in your keychain / pass / a file

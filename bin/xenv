@@ -578,13 +578,14 @@ EOF
 
 # xenv/
 
-Encrypted environment variables for this project. Every file under
-this directory is **safe to commit by design**.
+## NAME
 
-POSIX compliant. Git and agent friendly. Zero lock-in. Simple
-secrets management for discerning developers.
+xenv/ — this project's encrypted environment store
 
-🤖 The ENV for AI.
+## TL;DR;
+
+🤖 The ENV for AI — encrypted, per-key, safe-to-commit env vars.
+POSIX. Zero dependencies. Zero lock-in. Git- and agent-friendly.
 
 **Tool source**: <https://github.com/ahoward/xenv>. An agent reading
 this README can clone that repo to inspect the script, the test

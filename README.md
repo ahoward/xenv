@@ -1,12 +1,12 @@
 # xenv
 
+## NAME
+
+xenv — encrypted environment variables, one file per key
+
 ## TL;DR;
 
-encrypted environment variables. one file per key. every file safe to commit.
-
-posix. git- and agent-friendly. zero lock-in. simple secrets for discerning developers.
-
-🤖 the ENV for AI.
+🤖 the ENV for AI — encrypted, per-key, safe-to-commit env vars. POSIX. zero dependencies. zero lock-in. git- and agent-friendly.
 
 ```
 xenv
@@ -29,12 +29,6 @@ xenv get    production API_KEY       # silent on success — pipeable
 xenv @production ./server            # exec with env injected (== xenv run production ./server)
 xenv rotate production               # new passphrase, re-encrypt all
 ```
-
----
-
-## NAME
-
-xenv — encrypted environment variables, one file per key
 
 ## SYNOPSIS
 
