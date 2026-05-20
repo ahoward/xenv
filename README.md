@@ -2,7 +2,7 @@
 
 encrypted environment variables. one file per key. every file safe to commit.
 
-posix compliant. git and agent friendly. zero lock-in. simple secrets management for discerning developers.
+posix. git- and agent-friendly. zero lock-in. simple secrets for discerning developers.
 
 ```
 xenv
@@ -10,126 +10,59 @@ xenv
 ├── bin
 │   └── xenv                        # self-contained copy of the tool
 └── envs
-    ├── development
-    │   ├── APP_ENV.value.enc
-    │   └── README.md
-    ├── production
-    │   ├── API_KEY.value.enc       # one encrypted variable per file
-    │   ├── APP_ENV.value.enc
-    │   ├── DATABASE_URL.value.enc
-    │   ├── README.md               # frontmatter (KDF params) + docs
-    │   └── TLS_CERT.value.enc      # multi-line / binary values ok
-    ├── staging
-    │   ├── APP_ENV.value.enc
-    │   └── README.md
-    └── testing
-        ├── APP_ENV.value.enc
-        └── README.md
+    └── production
+        ├── README.md               # frontmatter (KDF params) + docs
+        ├── API_KEY.value.enc       # one encrypted variable per file
+        ├── DATABASE_URL.value.enc
+        └── TLS_CERT.value.enc      # multi-line / binary values ok
 ```
 
 ```sh
-xenv init                            # bootstrap the tree above
-xenv set    production API_KEY=sk-…  # store an encrypted value
+xenv init                            # bootstrap xenv/
+xenv set    production API_KEY=sk-…
 xenv set    production TLS_CERT < cert.pem
-xenv get    production API_KEY       # decrypt and print (silent on success)
-xenv list   production               # list key names (no passphrase needed)
-xenv run    production ./server      # exec with the env injected
-xenv rotate production               # new passphrase, re-encrypt every key
+xenv get    production API_KEY       # silent on success — pipeable
+xenv run    production ./server      # exec with env injected
+xenv rotate production               # new passphrase, re-encrypt all
 ```
 
 ## why
 
-- **per-key files** — surgical diffs. rotate one secret, touch one file. no merge conflicts when two devs add different keys. multi-line values (PEM, JSON, certs) just work.
+- **per-key files** — surgical diffs. rotate one secret, touch one file. no merge conflicts. multi-line values (PEM, JSON, certs) just work.
 - **every file safe to commit** — by design. no `.gitignore` to forget. no plaintext on disk. agents that `git add .` can't leak what isn't there.
-- **one POSIX shell script** — no daemon, no package manager, no runtime. `sh + openssl + awk`. 63 tests pass under `/bin/sh` and `/usr/bin/dash`.
+- **one POSIX shell script** — no daemon, no package manager, no runtime. `sh + openssl + awk`. 66 tests pass under `/bin/sh` and `/usr/bin/dash`.
 
-## usage
+## install
+
+```sh
+git clone https://github.com/ahoward/xenv && cp xenv/bin/xenv ~/bin/ && chmod +x ~/bin/xenv
+```
+
+requires `sh`, `openssl 3.0+`, `awk`, `mktemp`, `od`. macOS: `brew install openssl@3` and put it first on `$PATH`.
+
+after `xenv init`, the script copies itself into `xenv/bin/xenv` inside the project. clone on a new machine, put `myproject/xenv/bin` on `$PATH`, no re-install.
+
+## commands
 
 ```
 xenv init                            bootstrap xenv/ with 4 default envs
 xenv envs                            list environments
 xenv keygen <env> [--keychain|--pass|--file]
-                                     create env dir + passphrase
-xenv rotate <env>                    rotate passphrase, re-encrypt every key
-
-xenv set    <env> KEY=value          store a value (inline)
-xenv set    <env> KEY                read value from stdin (multi-line OK)
+xenv rotate <env>                    rotate passphrase, re-encrypt all
+xenv set    <env> KEY=value          (or: xenv set <env> KEY < file)
 xenv get    <env> KEY                decrypt and print (silent on success)
-xenv unset  <env> KEY                delete one key
-xenv list   <env>                    list key names (no decryption needed)
+xenv unset  <env> KEY
+xenv list   <env>                    list key names — no passphrase needed
 xenv edit   <env> KEY                decrypt → $EDITOR → re-encrypt
-
-xenv run    <env> CMD [args]         run command with all keys exported
+xenv run    <env> CMD [args]         exec with all keys exported
 xenv --     <env> CMD [args]         shorthand for run
-
-xenv help / version
 ```
 
-patterns:
-
-```sh
-# pipe binary or multi-line values in from a file. no quoting hell.
-xenv set production TLS_KEY < server.pem
-
-# round-trip in scripts. xenv get is silent on success.
-db=$(xenv get production DATABASE_URL)
-
-# CI: env var beats every other backend. set it as a platform secret.
-XENV_KEY_PRODUCTION=$SECRET xenv run production ./deploy
-```
-
-## exit codes
-
-- **0** — success. `xenv get` prints decrypted bytes on stdout, nothing on stderr.
-- **1** — anything went wrong. error goes to stderr with `xenv: ` prefix. covers: no env, no key, wrong passphrase / MAC failure, decrypt failed, tampered envelope, openssl missing, missing or malformed `xenv/README.md` frontmatter.
-
-distinct codes for distinct failures is a future enhancement. the safe pattern today:
-
-```sh
-if v=$(xenv get production API_KEY 2>/dev/null); then
-    use_it "$v"
-else
-    echo "couldn't fetch API_KEY" >&2
-fi
-```
-
-a few details worth knowing:
-
-- **`xenv get` is silent on success.** in a pipe / redirect / `$()`, stdout is the exact decrypted bytes — no trailing newline added, so scripting is precise. interactive at a terminal: one trailing newline is appended if the value didn't already end in one, so your next shell prompt isn't glued to the value. same auto-detection as `ls --color=auto`, `git`, `jq`.
-- **`xenv set KEY` (stdin form) strips a trailing newline** (because `value=$(cat)`). if you need one literally, pipe in two: `printf 'foo\n\n' | xenv set prod KEY`.
-- **`xenv edit` uses `$VISUAL`, then `$EDITOR`, then `vi`.** the plaintext temp file is created with `umask 077` in `${TMPDIR:-/tmp}`, with a `trap` on `EXIT INT TERM HUP` so `^C` cleans up.
-- **`xenv rotate` is all-or-nothing.** every value is decrypted to a tmpfs stash first; new params + re-encryption only happen if every decrypt succeeded.
-- **`atomic_write` is `tmp + mv` on the same filesystem.** if `xenv/` lives on NFS, atomicity is up to the underlying filesystem.
-
-## install
-
-```sh
-git clone https://github.com/ahoward/xenv.git
-cp xenv/bin/xenv ~/bin/xenv && chmod +x ~/bin/xenv
-```
-
-after `xenv init` in a project, the script copies itself into `xenv/bin/xenv` inside that project. clone the repo on a new machine, put `myproject/xenv/bin` on `$PATH`, and the tool comes along for the ride. no re-install, no version drift.
-
-**requirements**: `sh`, `openssl 3.0+` (for `kdf`), `awk`, `mktemp`, `od`. macOS ships LibreSSL — `brew install openssl@3` and put it first on `$PATH`.
+exit 0 on success, 1 on any failure (error → stderr with `xenv: ` prefix). pipe gives exact bytes; terminal appends one trailing newline if missing (same as `git`, `jq`, `ls --color=auto`).
 
 ## layout
 
-every `README.md` opens with YAML frontmatter. **same pattern, both scopes**: project state at the top, crypto state per env. keys are bare; the file's location tells you what they describe.
-
-top-level `xenv/README.md`:
-
-```yaml
----
-# xenv project state — DO NOT EDIT — managed by xenv
-version: v1
-id: myproject--7a2c4f8e1b9d3a6f5e8c2b0a4d7e9f1c
----
-
-# xenv/
-...
-```
-
-per-env `xenv/envs/production/README.md`:
+every `README.md` opens with YAML frontmatter — project state at the top, crypto state per env. keys are bare; the file's location tells you the scope.
 
 ```yaml
 ---
@@ -144,29 +77,21 @@ salt: a449a01266a1adf926a541ecd72dd2c2
 ...
 ```
 
-the body below the fence is yours — document variables, record who has access, leave notes for the next developer. `xenv rotate` rewrites the per-env frontmatter in place and **preserves the body verbatim**. your notes survive a key rotation.
+`xenv rotate` rewrites the frontmatter and **preserves the body verbatim** — notes survive key rotation. parser is 20 lines of awk: split each line on the first `:`, trim. no quoting, no nesting.
 
-the parser is twenty lines of awk and deliberately naive: for each line, split on the **first** `:`, trim whitespace. no quoting, no nesting, no types.
-
-every `.value.enc` is a single line:
-
-```
-xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>
-```
-
-encrypted, MAC'd, useless without the passphrase.
+every `.value.enc` is one line: `xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>`. encrypted, MAC'd, useless without the passphrase.
 
 ## passphrase resolution
 
 first hit wins:
 
-1. `$XENV_KEY_<ENV>` — environment variable (CI's friend)
-2. `$XENV_KEY` — environment variable (global fallback)
+1. `$XENV_KEY_<ENV>` — env var (CI)
+2. `$XENV_KEY` — global fallback
 3. `~/.config/xenv/projects/<id>/keys/<env>` — file, mode 600
-4. macOS keychain — `xenv` service, `<id>/<env>` account
+4. macOS keychain — service `xenv`, account `<id>/<env>`
 5. `pass show xenv/<id>/<env>`
 
-all backends are **scoped by project id**, so an env named `production` in project A and `production` in project B never share a key. project A can use the keychain, B can use `pass`, C can use the file — agents reading the script see the mechanism but never the values.
+all backends scoped by project id, so two `production` envs never share a key. heterogeneous setups are fine (A in keychain, B in pass, C in file).
 
 ## crypto
 
@@ -177,94 +102,80 @@ MAC      HMAC-SHA256, encrypt-then-MAC
 envelope xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>
 ```
 
-the version string `v3` is part of the MAC scope. rollback to a future format fails MAC verification. encrypt-then-MAC over CBC is the same security as AES-GCM for this threat model. GCM would be ideal but `openssl enc` doesn't expose AEAD in the CLI, and a 1000-line script doesn't get to ship its own AEAD implementation.
-
-the encryption key and MAC key are derived from separate halves of a single PBKDF2 output. one passphrase, two keys, no reuse.
+`v3` is in the MAC scope — rollback to a future format fails MAC verification. encryption key and MAC key are the two halves of one PBKDF2 output: one passphrase, two keys, no reuse.
 
 ## xenv is just a posix helper
 
-the encrypt/decrypt functions in this repo *are* the spec. each is ~15 lines of POSIX shell with `openssl(1)` calls. nothing else implements anything that isn't visible here.
+the encrypt/decrypt functions in this repo *are* the spec. ~15 lines each:
 
 - [`derive_keys`](bin/xenv#L253) — `passphrase + salt + iter → enc-key + mac-key`. PBKDF2-SHA256.
 - [`encrypt_value`](bin/xenv#L278) — plaintext → `xenv:v3:<iv>:<ct>:<mac>`. AES-256-CBC + HMAC-SHA256.
 - [`decrypt_value`](bin/xenv#L301) — envelope → plaintext. MAC verify first, then decrypt.
 
-read those three functions and you've read xenv. there is no proprietary format, no library lock-in, no runtime. **xenv is a convention plus a 1000-line POSIX shell wrapper around `openssl(1)`.** the convention is what matters; the wrapper is convenience.
+read those three functions and you've read xenv. no proprietary format, no library lock-in, no runtime. **xenv is a convention plus a 1000-line POSIX shell wrapper around `openssl(1)`.**
 
-to prove this, [`loaders/`](loaders/) holds reference read-only loaders in four languages, all generated from a single [`AGENT_PROMPT.md`](loaders/AGENT_PROMPT.md):
+to prove this, [`loaders/`](loaders/) holds reference loaders in four languages, all generated from a single [`AGENT_PROMPT.md`](loaders/AGENT_PROMPT.md):
 
-- [`loaders/pythong/xenv.py`](loaders/pythong/xenv.py) — 150 lines, stdlib + `openssl(1)` for AES
-- [`loaders/node/xenv.js`](loaders/node/xenv.js) — 150 lines, pure stdlib `crypto`
-- [`loaders/go/xenv/xenv.go`](loaders/go/xenv/xenv.go) — 240 lines, stdlib + `golang.org/x/crypto/pbkdf2`
-- [`loaders/rust/src/lib.rs`](loaders/rust/src/lib.rs) — 250 lines, RustCrypto crates (`aes` + `cbc` + `hmac` + `sha2` + `pbkdf2`)
+- [`loaders/pythong/`](loaders/pythong/xenv.py) — stdlib + `openssl(1)` for AES
+- [`loaders/node/`](loaders/node/xenv.js) — pure stdlib `crypto`
+- [`loaders/go/`](loaders/go/xenv/xenv.go) — stdlib + `golang.org/x/crypto/pbkdf2`
+- [`loaders/rust/`](loaders/rust/src/lib.rs) — RustCrypto crates
 
-`loaders/test.sh` exercises all three against a real vault. an agent with this README and the prompt file can produce a working loader in any language with PBKDF2-SHA256, HMAC-SHA256, and AES-256-CBC primitives (which is every modern language).
+`loaders/test.sh` exercises all four against a real vault. any language with PBKDF2-SHA256 + HMAC-SHA256 + AES-256-CBC can write its own.
 
 if this tool ever disappeared, your data wouldn't.
 
-## prior art: phoenix architecture
+## phoenix architecture
 
-the design takes after Chad Fowler's [phoenix architecture](https://www.infoq.com/news/2013/08/immutable-servers/) — "Trash Your Servers and Burn Your Code." nothing on the running system is special, because everything is reconstructable from source. burn it all down, and it rises from the ashes.
+design takes after Chad Fowler's [phoenix architecture](https://www.infoq.com/news/2013/08/immutable-servers/) — *trash your servers and burn your code*. nothing on the running system is special; everything reconstructs from source.
 
-xenv applies the same idea to secrets state:
+- **vault** ← committed `.value.enc` bytes + passphrase
+- **tool** ← self-contained script copied at `xenv init`
+- **format** ← [`loaders/AGENT_PROMPT.md`](loaders/AGENT_PROMPT.md): burn all loaders, an agent rebuilds them
+- **docs** ← generated by `bin/xenv` itself, can't drift from the code
 
-- **the encrypted vault** (`xenv/envs/*/*.value.enc`) reconstructs from the committed bytes plus the passphrase. no hidden state on the running machine.
-- **the tool** (`bin/xenv`) reconstructs from this repo. it's a self-contained POSIX shell script copied into each project at `xenv init` — clone the project on a new machine and the tool comes with it.
-- **the format** reconstructs from `loaders/AGENT_PROMPT.md`. burn down every loader in this repo and an agent reading the prompt can regenerate equivalent ones in any language.
-- **the doc** reconstructs from the code. the embedded README that `xenv init` writes is generated by `bin/xenv` itself — there's no hand-edited document that could drift from the implementation.
+burn it all down. it rises from the ashes.
 
 ## threat model
 
-a **dev tool for one human (or a small trusted team)**. it protects against:
+a **dev tool for one human or a small trusted team**. protects against:
 
-- accidental commit of plaintext secrets — there is no plaintext on disk
-- losing a laptop — passphrase is in your keychain, never in the repo
-- the AI agent in your editor that `git add .`s everything
+- accidental commit of plaintext secrets (none on disk)
+- losing a laptop (passphrase outside the repo)
+- the AI in your editor that `git add .`s everything
 
-it does NOT protect against:
+does NOT protect against same-user attackers, an attacker who has the passphrase, or timing side-channels in MAC compare.
 
-- an attacker running commands as the same user (they've already won)
-- an attacker who has the passphrase (that's what it's *for*)
-- timing side-channels in the MAC compare (not constant-time)
-
-**no input validation.** var names, env names, and values go to disk as bytes. values can contain quotes, newlines, backticks, null bytes — they're stored as file contents and exported as a shell variable, never re-parsed.
+**no input validation.** var names, env names, and values are bytes. quotes, newlines, backticks, null bytes — all fine, stored verbatim, never re-parsed.
 
 ## complex tools create pwnage
 
 a partial list of how secrets actually get leaked:
 
-- **may 2026 — CISA / DHS**. a Nightwing contractor pushed AWS GovCloud admin keys, plaintext passwords, and internal docs to a public github repo. they had **explicitly disabled** GitHub's built-in secret detection because it kept getting in the way. three high-privilege GovCloud accounts compromised; keys stayed valid for 48 hours. (Krebs, [`cisa-admin-leaked-aws-govcloud-keys-on-github`](https://krebsonsecurity.com/2026/05/cisa-admin-leaked-aws-govcloud-keys-on-github/))
-- **november 2016 — Uber**. AWS access keys committed to a private github repo. an attacker found them, pulled S3 buckets, exposed 57 million users. paid the hacker $100k to "delete it" and didn't disclose for over a year.
-- **every single day**. github's own secret-scanning catches hundreds of thousands of leaked credentials per year. gitleaks and trufflehog find more.
+- **may 2026 — CISA / DHS**: contractor pushed AWS GovCloud admin keys to a public repo. they had **explicitly disabled** GitHub's secret detection. ([Krebs](https://krebsonsecurity.com/2026/05/cisa-admin-leaked-aws-govcloud-keys-on-github/))
+- **2016 — Uber**: AWS keys in a private repo, 57M users exposed, $100k hush payment, disclosure delayed a year.
+- **every day**: github catches hundreds of thousands of leaked credentials per year. gitleaks and trufflehog find more.
 
-the pattern is the same every time. tooling offered a **secure path** (vault, KMS, encrypted store, pre-commit hooks, secret scanning) and an **easy path** (paste it in a file, commit, move on). humans took the easy path. some — like the CISA contractor — actively disabled the controls because they *got in the way of getting work done*.
+the pattern is always the same. tooling offered a *secure path* (vault, KMS, pre-commit hooks) and an *easy path* (paste it in a file, commit, move on). humans took the easy path; some actively disabled the controls because they *got in the way of getting work done*.
 
-xenv refuses to participate in this pattern. there is no secure path vs easy path. there is one path:
+xenv has no easy/secure split. one path:
 
-- **no `.gitignore` rule to forget.** every file is encrypted or public-by-design.
-- **no secret-detection to disable.** the detection is the design — plaintext can't be in `xenv/` because the tool never puts it there.
-- **no "just commit it this once."** there is no plaintext on disk to commit.
-- **no separate workflow for sharing.** the encrypted vault is the shared artifact.
-- **agents don't need rules either.** an agent that runs `git add .` is fine. an agent reading any `xenv/README.md` sees the frontmatter warning before the values.
+- no `.gitignore` to forget — every file is encrypted or public-by-design
+- no secret detection to disable — the detection IS the design
+- no "just commit it this once" — there's no plaintext on disk to commit
+- no separate workflow for sharing — the encrypted vault IS the artifact
 
 complex security tools generate workarounds. simple tools that make the right thing the only thing don't.
 
 ## testing
 
 ```sh
-test/run.sh                                # uses $SHELL_BIN or /bin/sh
-SHELL_BIN=/usr/bin/dash test/run.sh        # verify strict POSIX
+test/run.sh                          # uses $SHELL_BIN or /bin/sh
+SHELL_BIN=/usr/bin/dash test/run.sh  # verify strict POSIX
+loaders/test.sh                      # round-trip vs all four loaders
 ```
 
-63 tests. covers init layout, per-key file model, frontmatter parser at both scopes, DO-NOT-EDIT warnings on both READMEs, rotation preserving the README body, project-id uniqueness, MAC tamper detection, multi-line and PEM values, concurrent writes, partial-failure atomicity, env-var precedence, top-level README documenting `XENV_KEY_<ENV>`, and the rest.
-
-## notes
-
-- `xenv run` does PBKDF2 once per call, not once per key
-- `xenv list` doesn't need the passphrase — it's `ls` minus the extension
-- `xenv get` is silent on success — designed for scripting (`v=$(xenv get prod KEY)`)
-- `xenv init` is heavy one-time setup; after that, `xenv set` is the daily driver
-- no backwards-compat with previous spike versions. clean break.
+66 tests + 24 loader assertions. covers init layout, per-key file model, frontmatter parser at both scopes, rotation preserving the body, MAC tamper detection, multi-line and PEM values, concurrent writes, partial-failure atomicity, env-var precedence, tty-aware output.
 
 ## license
 
