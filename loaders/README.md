@@ -1,13 +1,13 @@
 # loaders
 
-Read-only loaders for the xenv format in three languages — proof that the format is portable and the pitch in the project README ("xenv is a convention plus a shell wrapper") is real.
+Read-only loaders for the xenv format in four languages — proof that the format is portable and the pitch in the project README ("xenv is a convention plus a shell wrapper") is real.
 
-All three loaders were generated from [`AGENT_PROMPT.md`](AGENT_PROMPT.md). Feed that file to any coding agent and you should get an equivalent loader in the target language. The checked-in implementations are reference outputs, not additional spec.
+All four loaders were generated from [`AGENT_PROMPT.md`](AGENT_PROMPT.md). Feed that file to any coding agent and you should get an equivalent loader in the target language. The checked-in implementations are reference outputs, not additional spec.
 
 ## status
 
 ```sh
-loaders/test.sh         # exercise all three loaders against a real vault
+loaders/test.sh         # exercise all four loaders against a real vault
 ```
 
 The test rig builds a sandbox `xenv/` tree with known plaintexts, then invokes each loader's CLI and asserts:
@@ -22,17 +22,19 @@ A loader is skipped if its runtime isn't installed.
 
 | | importable | CLI |
 |---|---|---|
-| **pythong/xenv.py** | `from xenv import load, decrypt_one` | `python3 xenv.py <env> [<key>]` |
-| **node/xenv.js**    | `const { load, decryptOne } = require('./xenv.js')` | `node xenv.js <env> [<key>]` |
-| **go/xenv.go**      | `import "xenv-loader-go/xenv"` | `go run ./main <env> [<key>]` |
+| **pythong/xenv.py**  | `from xenv import load, decrypt_one`            | `python3 xenv.py <env> [<key>]`        |
+| **node/xenv.js**     | `const { load, decryptOne } = require('./xenv.js')` | `node xenv.js <env> [<key>]`           |
+| **go/xenv/**         | `import "xenv-loader-go/xenv"`                  | `go run ./main <env> [<key>]`          |
+| **rust/src/lib.rs**  | `use xenv::{load, decrypt_one};`                | `xenv-loader <env> [<key>]`            |
 
-All three look for the encrypted tree at `$XENV_ROOT` (default `./xenv/`) and read the passphrase from `$XENV_KEY_<ENV>` or `$XENV_KEY`. No file-based / keychain / `pass` fallback — that's the shell tool's job. The realistic deployment path is "container reads `$XENV_KEY_PRODUCTION` injected by the platform's secret manager."
+All four look for the encrypted tree at `$XENV_ROOT` (default `./xenv/`) and read the passphrase from `$XENV_KEY_<ENV>` or `$XENV_KEY`. No file-based / keychain / `pass` fallback — that's the shell tool's job. The realistic deployment path is "container reads `$XENV_KEY_PRODUCTION` injected by the platform's secret manager."
 
 ## crypto choices
 
 - **pythong**: stdlib `hashlib.pbkdf2_hmac` + `hmac`. AES-CBC via `openssl(1)` subprocess (stdlib has no AES). Swap to `cryptography` if you already depend on it.
 - **node**: pure stdlib `crypto`. Zero deps.
 - **go**: stdlib `crypto/*` + `golang.org/x/crypto/pbkdf2` (well-known x/crypto subrepo).
+- **rust**: RustCrypto crates (`aes` + `cbc` + `hmac` + `sha2` + `pbkdf2`). Rust has no stdlib crypto; these are the universally-accepted choice.
 
 ## adding a new language
 

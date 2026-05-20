@@ -135,6 +135,19 @@ else
   SKIP=$((SKIP + 1))
 fi
 
+if command -v cargo >/dev/null 2>&1; then
+  # Pre-build the release binary, then invoke it directly. Avoids
+  # cargo's progress chatter on every exercise() call.
+  ( cd "$LOADERS/rust" && cargo build --release --quiet ) || {
+    red "rust: cargo build failed"
+    FAIL=$((FAIL + 1))
+  }
+  exercise "rust" "$LOADERS/rust/target/release/xenv-loader"
+else
+  yellow "skip: cargo not found"
+  SKIP=$((SKIP + 1))
+fi
+
 # ── summary ─────────────────────────────────────────────────────
 
 echo

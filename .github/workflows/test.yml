@@ -25,7 +25,7 @@ jobs:
 
   loaders:
     runs-on: ubuntu-latest
-    name: loader round-trip tests (python, node, go)
+    name: loader round-trip tests (python, node, go, rust)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,6 +34,15 @@ jobs:
         with: { node-version: '20' }
       - uses: actions/setup-go@v5
         with: { go-version: '1.22' }
+      # Rust is preinstalled on ubuntu-latest via rustup; no setup needed.
+      - name: cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            loaders/rust/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('loaders/rust/Cargo.toml') }}
       - name: prefetch go deps
         run: cd loaders/go && go mod tidy
       - name: run loader rig

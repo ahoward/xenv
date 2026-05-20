@@ -2,7 +2,7 @@
 
 You are writing a *loader* for the [xenv](https://github.com/ahoward/xenv) encrypted-environment-variable format. Feed this document to a coding agent in any language; the agent should produce a working loader without needing to read the `bin/xenv` shell script.
 
-This file is the spec. The loaders checked in alongside it (`loaders/go/`, `loaders/node/`, `loaders/pythong/`) were generated from this prompt and should be treated as reference implementations — not as additional spec.
+This file is the spec. The loaders checked in alongside it (`loaders/go/`, `loaders/node/`, `loaders/pythong/`, `loaders/rust/`) were generated from this prompt and should be treated as reference implementations — not as additional spec.
 
 ## what xenv is, in one paragraph
 

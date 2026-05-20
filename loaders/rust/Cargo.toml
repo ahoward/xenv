@@ -1,0 +1,28 @@
+[package]
+name = "xenv-loader"
+version = "0.1.0"
+edition = "2021"
+description = "Read-only loader for the xenv encrypted-environment format. Generated from ../AGENT_PROMPT.md."
+publish = false
+
+[lib]
+name = "xenv"
+path = "src/lib.rs"
+
+[[bin]]
+name = "xenv-loader"
+path = "src/bin/xenv-loader.rs"
+
+# All five are RustCrypto crates — the de-facto standard for crypto
+# primitives in Rust. They are NOT in std (Rust has no stdlib crypto)
+# but they are the universally-accepted choice for AES-CBC + HMAC +
+# PBKDF2 in pure Rust.
+[dependencies]
+aes = "0.8"
+cbc = { version = "0.1", features = ["std"] }
+hmac = "0.12"
+sha2 = "0.10"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+
+[profile.release]
+opt-level = 1
