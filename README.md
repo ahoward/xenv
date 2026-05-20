@@ -4,6 +4,8 @@ encrypted environment variables. one file per key. every file safe to commit.
 
 posix. git- and agent-friendly. zero lock-in. simple secrets for discerning developers.
 
+🤖 the ENV for AI.
+
 ```
 xenv
 ├── README.md                       # frontmatter (project id) + docs
