@@ -598,6 +598,7 @@ xenv set  <env> KEY=value          # store a value
 xenv set  <env> KEY < file         # store a multi-line/binary value
 xenv edit <env> KEY                # decrypt → $EDITOR → re-encrypt
 xenv run  <env> CMD [args]         # run a command with the env injected
+xenv @<env>    CMD [args]          # shorthand: `xenv @production ./server`
 ```
 
 See `xenv help` for the full command list. Each env in `xenv/envs/`
@@ -744,7 +745,7 @@ usage:
   xenv edit   <env> KEY              decrypt → $VISUAL/$EDITOR → re-encrypt
 
   xenv run    <env> CMD [args]       run command with all keys exported
-  xenv --     <env> CMD [args]       shorthand for run
+  xenv @<env>      CMD [args]        shorthand for run (e.g. `xenv @prod ./deploy`)
 
   xenv help / version
 
@@ -1079,8 +1080,17 @@ main() {
       shift; [ $# -ge 2 ] || die "edit needs <env> KEY"
       cmd_edit "$1" "$2"
       ;;
-    run|--)
+    run)
       shift; cmd_run "$@"
+      ;;
+    @*)
+      # `xenv @<env> CMD [args]` — shorthand for `xenv run <env> CMD [args]`.
+      # The @ is a screamingly-visible "this is an env reference" marker that
+      # can't be confused with a subcommand. Strip the @, forward to cmd_run.
+      env_name=${cmd#@}
+      [ -n "$env_name" ] || die "empty env name after '@'"
+      shift; [ $# -ge 1 ] || die "@$env_name needs a command to run"
+      cmd_run "$env_name" "$@"
       ;;
     *)
       err "unknown command: $cmd"

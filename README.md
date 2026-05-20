@@ -22,7 +22,7 @@ xenv init                            # bootstrap xenv/
 xenv set    production API_KEY=sk-…
 xenv set    production TLS_CERT < cert.pem
 xenv get    production API_KEY       # silent on success — pipeable
-xenv run    production ./server      # exec with env injected
+xenv @production ./server            # exec with env injected (== xenv run production ./server)
 xenv rotate production               # new passphrase, re-encrypt all
 ```
 
@@ -46,7 +46,7 @@ xenv unset  <env> KEY
 xenv list   <env>
 xenv edit   <env> KEY
 xenv run    <env> CMD [args]
-xenv --     <env> CMD [args]           # alias for run
+xenv @<env>      CMD [args]            # shorthand for run
 xenv help | version
 ```
 
@@ -88,7 +88,7 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` 3.0+, `awk`, `mkt
 > Decrypt to a tmpfile (mode 600 in `$TMPDIR`), invoke `$VISUAL` or `$EDITOR` or `vi`, re-encrypt on exit. The tmpfile is cleaned via `trap` on `EXIT INT TERM HUP`. If the editor closes without changes, the encrypted file is not rewritten.
 
 `run <env> CMD [args]`
-> Decrypt every value in the env, export each as a shell variable, then `exec` CMD with the env injected. PBKDF2 runs once per call, not once per key. `xenv -- <env> CMD [args]` is a shorthand.
+> Decrypt every value in the env, export each as a shell variable, then `exec` CMD with the env injected. PBKDF2 runs once per call, not once per key. `xenv @<env> CMD [args]` is the screaming-loud shorthand: `xenv @production ./deploy`.
 
 `help`, `version`
 > What they say.
@@ -158,7 +158,7 @@ Bootstrap and use:
 xenv init
 xenv set production API_KEY=sk-abc
 xenv get production API_KEY
-xenv run production ./server
+xenv @production ./server
 ```
 
 Pipe binary or multi-line values in from a file:
@@ -176,7 +176,7 @@ db=$(xenv get production DATABASE_URL)
 CI deploy with the env injected:
 
 ```sh
-XENV_KEY_PRODUCTION=$SECRET xenv run production ./deploy
+XENV_KEY_PRODUCTION=$SECRET xenv @production ./deploy
 ```
 
 Safe error handling:

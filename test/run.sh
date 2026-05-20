@@ -506,10 +506,42 @@ test_run_no_env_fails() {
   return 0
 }
 
-test_run_dash_shorthand() {
+test_at_shorthand_runs_like_run() {
+  # `xenv @<env> CMD` is the screaming-loud shorthand for `xenv run <env> CMD`.
   xenv init >/dev/null 2>&1
-  out=$(xenv -- production sh -c 'echo "$APP_ENV"')
-  assert_eq "production" "$out" "xenv -- shorthand"
+  out=$(xenv @production sh -c 'echo "$APP_ENV"')
+  assert_eq "production" "$out" "xenv @env shorthand"
+}
+
+test_at_shorthand_propagates_exit_code() {
+  # `xenv @<env> CMD` must propagate the inner command's exit code, just
+  # like `xenv run` does. exec(2) replaces xenv, so exit code = inner's.
+  xenv init >/dev/null 2>&1
+  xenv @production sh -c 'exit 17' >/dev/null 2>&1
+  [ $? -eq 17 ] || return 1
+}
+
+test_at_empty_env_fails() {
+  # `xenv @ CMD` is a typo trap — the @ with nothing after it is meaningless.
+  # Must fail loud rather than silently dispatch to an empty env name.
+  xenv init >/dev/null 2>&1
+  out=$(xenv @ ls 2>&1) && return 1
+  echo "$out" | grep -qi "empty env name" || return 1
+}
+
+test_at_no_command_fails() {
+  # `xenv @env` with no command to run must error, not exec nothing.
+  xenv init >/dev/null 2>&1
+  out=$(xenv @production 2>&1) && return 1
+  echo "$out" | grep -qi "needs a command" || return 1
+}
+
+test_dash_dash_form_retired() {
+  # `xenv -- env CMD` was the old shorthand. It's gone — @env replaces it.
+  # The dispatcher should reject `--` as an unknown command.
+  xenv init >/dev/null 2>&1
+  out=$(xenv -- production sh -c 'echo gone' 2>&1) && return 1
+  echo "$out" | grep -qi "unknown command" || return 1
 }
 
 # ── edit ───────────────────────────────────────────────────────────
@@ -868,7 +900,11 @@ run_test "run preserves multi-line"                 test_run_preserves_multiline
 run_test "run propagates exit code"                 test_run_propagates_exit_code
 run_test "run no command fails"                     test_run_no_command_fails
 run_test "run no env fails"                         test_run_no_env_fails
-run_test "xenv -- shorthand"                        test_run_dash_shorthand
+run_test "@env shorthand runs like `run`"           test_at_shorthand_runs_like_run
+run_test "@env shorthand propagates exit code"      test_at_shorthand_propagates_exit_code
+run_test "@ with no env fails"                      test_at_empty_env_fails
+run_test "@env with no command fails"               test_at_no_command_fails
+run_test "old `--` shorthand is retired"            test_dash_dash_form_retired
 
 # edit
 run_test "edit round-trip"                          test_edit_round_trip
