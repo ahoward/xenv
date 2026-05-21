@@ -529,11 +529,33 @@ test_at_empty_env_fails() {
   echo "$out" | grep -qi "empty env name" || return 1
 }
 
-test_at_no_command_fails() {
-  # `xenv @env` with no command to run must error, not exec nothing.
+test_at_no_command_prints_env() {
+  # `xenv @env` with no CMD prints KEY=value lines for every value in
+  # the env, one per line. Same shape as env(1)'s output. Lets you peek
+  # at the loaded env without exec'ing anything.
   xenv init >/dev/null 2>&1
-  out=$(xenv @production 2>&1) && return 1
-  echo "$out" | grep -qi "needs a command" || return 1
+  xenv set production HELLO=world >/dev/null 2>&1
+  xenv set production NUMBER=42 >/dev/null 2>&1
+
+  out=$(xenv @production) || return 1
+  # APP_ENV is the starter value init writes for every env
+  echo "$out" | grep -qx 'APP_ENV=production' || return 1
+  echo "$out" | grep -qx 'HELLO=world'        || return 1
+  echo "$out" | grep -qx 'NUMBER=42'          || return 1
+}
+
+test_at_no_command_multiline_values_intact() {
+  # Multi-line values appear verbatim — the dump is a sequence of
+  # KEY=value pairs with internal newlines passed through. The
+  # consumer can quote-massage if they want.
+  xenv init >/dev/null 2>&1
+  printf 'line1\nline2\nline3' | xenv set production MULTI >/dev/null 2>&1
+
+  out=$(xenv @production)
+  # all three lines of the multi-line value present
+  echo "$out" | grep -qx 'MULTI=line1'  || return 1
+  echo "$out" | grep -qx 'line2'        || return 1
+  echo "$out" | grep -qx 'line3'        || return 1
 }
 
 test_dash_dash_form_retired() {
@@ -903,7 +925,8 @@ run_test "run no env fails"                         test_run_no_env_fails
 run_test "@env shorthand runs like `run`"           test_at_shorthand_runs_like_run
 run_test "@env shorthand propagates exit code"      test_at_shorthand_propagates_exit_code
 run_test "@ with no env fails"                      test_at_empty_env_fails
-run_test "@env with no command fails"               test_at_no_command_fails
+run_test "@env with no CMD prints env"              test_at_no_command_prints_env
+run_test "@env with no CMD preserves multi-line"    test_at_no_command_multiline_values_intact
 run_test "old `--` shorthand is retired"            test_dash_dash_form_retired
 
 # edit

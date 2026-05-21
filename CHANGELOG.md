@@ -7,6 +7,25 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.7.2-posix] — 2026-05-21
+
+### Added
+
+- **`xenv @<env>` with no CMD prints the loaded env.** Previously
+  errored "needs a command to run." Now decrypts every value in `<env>`
+  and writes `KEY=value` lines to stdout — same shape as `env(1)`. Lets
+  you peek at the loaded env without exec'ing anything. Multi-line
+  values pass through with internal newlines intact; the consumer can
+  quote-massage if needed.
+
+  Implementation: factored a `cmd_envdump` helper that shares the
+  decrypt loop with `cmd_run` but prints instead of `exec`'ing. The
+  `@*)` dispatcher arm now routes to `cmd_envdump` when no CMD follows,
+  to `cmd_run` when one does.
+
+  Two new tests; one obsolete test (`@env with no command fails`)
+  retired.
+
 ## [0.7.1-posix] — 2026-05-21
 
 ### Security

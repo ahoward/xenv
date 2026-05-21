@@ -45,6 +45,7 @@ xenv list   <env>
 xenv edit   <env> KEY
 xenv run    <env> CMD [args]
 xenv @<env>      CMD [args]            # shorthand for run
+xenv @<env>                            # no CMD: print KEY=value lines
 xenv help | version
 ```
 
@@ -86,7 +87,7 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` 3.0+, `awk`, `mkt
 > Decrypt to a tmpfile (mode 600 in `$TMPDIR`), invoke `$VISUAL` or `$EDITOR` or `vi`, re-encrypt on exit. The tmpfile is cleaned via `trap` on `EXIT INT TERM HUP`. If the editor closes without changes, the encrypted file is not rewritten.
 
 `run <env> CMD [args]`
-> Decrypt every value in the env, export each as a shell variable, then `exec` CMD with the env injected. PBKDF2 runs once per call, not once per key. `xenv @<env> CMD [args]` is the screaming-loud shorthand: `xenv @production ./deploy`.
+> Decrypt every value in the env, export each as a shell variable, then `exec` CMD with the env injected. PBKDF2 runs once per call, not once per key. `xenv @<env> CMD [args]` is the screaming-loud shorthand: `xenv @production ./deploy`. With **no** CMD, `xenv @<env>` decrypts everything and prints `KEY=value` lines to stdout — same shape as `env(1)` — letting you peek at the loaded env without exec'ing anything.
 
 `help`, `version`
 > What they say.
@@ -157,6 +158,15 @@ xenv init
 xenv set production API_KEY=sk-abc
 xenv get production API_KEY
 xenv @production ./server
+```
+
+Peek at the loaded env (no CMD — just prints KEY=value lines):
+
+```sh
+xenv @production
+# → APP_ENV=production
+# → API_KEY=sk-abc
+# → DATABASE_URL=postgres://localhost
 ```
 
 Pipe binary or multi-line values in from a file:

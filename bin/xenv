@@ -40,7 +40,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.7.1-posix"
+XENV_VERSION="0.7.2-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
@@ -611,6 +611,7 @@ xenv set  <env> KEY < file         # store a multi-line/binary value
 xenv edit <env> KEY                # decrypt → $EDITOR → re-encrypt
 xenv run  <env> CMD [args]         # run a command with the env injected
 xenv @<env>    CMD [args]          # shorthand: `xenv @production ./server`
+xenv @<env>                        # no CMD: print KEY=value lines for the env
 ```
 
 See `xenv help` for the full command list. Each env in `xenv/envs/`
@@ -759,6 +760,7 @@ usage:
 
   xenv run    <env> CMD [args]       run command with all keys exported
   xenv @<env>      CMD [args]        shorthand for run (e.g. `xenv @prod ./deploy`)
+  xenv @<env>                        no CMD: print KEY=value lines for the env
 
   xenv help / version
 
@@ -1056,6 +1058,34 @@ EOF
   exec "$@"
 }
 
+# cmd_envdump <env> — decrypt every value in <env> and print "KEY=value"
+# lines to stdout, one per line. Same shape as env(1)'s output. Used
+# when `xenv @<env>` is called with no following CMD; lets you peek at
+# the loaded env without exec'ing anything.
+#
+# Values are printed verbatim, exactly as they would be exported by
+# cmd_run. Multi-line values appear with their internal newlines intact;
+# the consumer is responsible for any shell-quoting they need.
+cmd_envdump() {
+  [ $# -ge 1 ] || die "envdump needs <env>"
+  env_name=$1
+
+  dir=$(env_dir "$env_name")
+  [ -d "$dir" ] || die "no env '$env_name'"
+
+  read -r enc_key mac_key <<EOF
+$(keys_for_env "$env_name")
+EOF
+  [ -n "$enc_key" ] || exit 1
+
+  for f in "$dir"/*"$XENV_VALUE_EXT"; do
+    [ -f "$f" ] || continue
+    name=${f##*/}; name=${name%"$XENV_VALUE_EXT"}
+    value=$(decrypt_value "$enc_key" "$mac_key" < "$f") || die "decrypt failed for $name"
+    printf '%s=%s\n' "$name" "$value"
+  done
+}
+
 # ── dispatch ──────────────────────────────────────────────────────
 
 main() {
@@ -1098,12 +1128,19 @@ main() {
       ;;
     @*)
       # `xenv @<env> CMD [args]` — shorthand for `xenv run <env> CMD [args]`.
-      # The @ is a screamingly-visible "this is an env reference" marker that
-      # can't be confused with a subcommand. Strip the @, forward to cmd_run.
+      # `xenv @<env>` (no CMD) — print KEY=value lines for the env's loaded
+      # values, one per line. Same shape as env(1)'s output.
+      #
+      # The @ is a screamingly-visible "this is an env reference" marker
+      # that can't be confused with a subcommand.
       env_name=${cmd#@}
       [ -n "$env_name" ] || die "empty env name after '@'"
-      shift; [ $# -ge 1 ] || die "@$env_name needs a command to run"
-      cmd_run "$env_name" "$@"
+      shift
+      if [ $# -ge 1 ]; then
+        cmd_run "$env_name" "$@"
+      else
+        cmd_envdump "$env_name"
+      fi
       ;;
     *)
       err "unknown command: $cmd"
