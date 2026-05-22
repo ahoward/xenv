@@ -22,31 +22,46 @@ xenv
 ```
 
 ```sh
-xenv init                            # bootstrap xenv/
-xenv set    production API_KEY=sk-…
-xenv set    production TLS_CERT < cert.pem
-xenv get    production API_KEY       # silent on success — pipeable
-xenv @production ./server            # exec with env injected (== xenv run production ./server)
-xenv rotate production               # new passphrase, re-encrypt all
+xenv setup                           # bootstrap xenv/ (or adopt an existing one)
+xenv set @production API_KEY=sk-…
+xenv set @production TLS_CERT < cert.pem
+xenv get @production API_KEY         # silent on success — pipeable
+xenv @production ./server            # exec with env injected
+xenv key rotate @production          # new passphrase, re-encrypt all
 ```
 
 ## SYNOPSIS
 
 ```
-xenv init
-xenv envs
-xenv keygen <env> [--keychain | --pass | --file]
-xenv rotate <env>
-xenv set    <env> KEY=value
-xenv set    <env> KEY                  # value on stdin
-xenv get    <env> KEY
-xenv unset  <env> KEY
-xenv list   <env>
-xenv edit   <env> KEY
-xenv run    <env> CMD [args]
+xenv setup                             # bootstrap or adopt
+xenv environments                      # list envs
+
+xenv key generate @<env> [--keychain | --pass | --file]
+xenv key set      @<env> [--keychain | --pass | --file]   # passphrase on stdin/tty
+xenv key rotate   @<env>
+xenv key show     @<env> [--reveal]
+xenv key forget   @<env>
+
+xenv set    @<env> KEY=value
+xenv set    @<env> KEY                  # value on stdin
+xenv get    @<env> KEY
+xenv unset  @<env> KEY
+xenv list   @<env>
+xenv edit   @<env> KEY
+
+xenv run    @<env> CMD [args]
 xenv @<env>      CMD [args]            # shorthand for run
 xenv @<env>                            # no CMD: print KEY=value lines
+
 xenv help | version
+```
+
+The `@<env>` token may appear **anywhere** in argv. These are equivalent:
+
+```
+xenv get @production API_KEY
+xenv @production get API_KEY
+xenv get API_KEY @production
 ```
 
 ## DESCRIPTION
@@ -55,38 +70,47 @@ xenv stores encrypted environment variables in a project's repository. Each vari
 
 Every file in `xenv/` is safe to commit by design. The encryption key is the only thing that must not be committed; the design makes it impossible to put it there by accident.
 
-xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` 3.0+, `awk`, `mktemp`, and `od`. After `xenv init`, the script copies itself into `xenv/bin/xenv` inside the project — clone on a new machine, put `myproject/xenv/bin` on `$PATH`, no re-install needed.
+xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` 3.0+, `awk`, `mktemp`, and `od`. After `xenv setup`, the script copies itself into `xenv/bin/xenv` inside the project — clone on a new machine, put `myproject/xenv/bin` on `$PATH`, no re-install needed.
 
 ## COMMANDS
 
-`init`
-> Bootstrap `xenv/` with four default envs (testing, development, staging, production), generate per-env passphrases, write the project id into `xenv/README.md`.
+`setup`
+> Bootstrap or adopt. If `./xenv/` doesn't exist: create it with four default envs (testing, development, staging, production), generate per-env passphrases (or honor `$XENV_KEY_<ENV>` if set), write the project id into `xenv/README.md`. If `./xenv/` already exists (e.g. you cloned a teammate's repo): walk each env, prompt for the passphrase (or honor `$XENV_KEY_<ENV>`), decrypt one value to MAC-verify, cache to `~/.config/xenv/projects/<id>/keys/<env>` on success. Non-tty stdin without env vars set: skip with a warning.
 
-`envs`
-> List environments and which have a known passphrase locally.
+`environments`
+> List envs and which have a known passphrase locally.
 
-`keygen <env> [--keychain | --pass | --file]`
-> Create a new env directory and generate a fresh passphrase. The backend flag selects where the passphrase is stored locally.
+`key generate @<env> [--keychain | --pass | --file]`
+> Create a new env directory and generate a fresh random passphrase. The backend flag selects where the passphrase is stored locally.
 
-`rotate <env>`
+`key set @<env> [--keychain | --pass | --file] [--force]`
+> Read a passphrase from stdin (or tty no-echo prompt). MAC-verify against existing values; refuse to cache on mismatch unless `--force`. Use this to pin a passphrase against an existing vault, or to re-cache a passphrase after `key forget`.
+
+`key rotate @<env>`
 > Generate a new passphrase, re-encrypt every value in the env. All-or-nothing: every value is decrypted to a tmpfs stash first; new params and re-encryption only commit if every decrypt succeeded.
 
-`set <env> KEY=value`
+`key show @<env> [--reveal]`
+> Default: print where the passphrase lives (file path, keychain entry, or `pass` entry). With `--reveal`, print the actual passphrase to stdout. Loud foot-gun — only with the explicit flag.
+
+`key forget @<env>`
+> Remove the cached passphrase from local storage (file/keychain/pass). Leaves the encrypted vault intact. Use for "I want to test the secret-manager path on my dev machine" or "deprovision this laptop."
+
+`set @<env> KEY=value`
 > Store an encrypted value. With no `=`, reads the value from stdin (multi-line / binary OK). Stdin form strips one trailing newline (`value=$(cat)`); pipe in two if a literal trailing newline is needed.
 
-`get <env> KEY`
+`get @<env> KEY`
 > Decrypt and print to stdout. Silent on success. In a pipe / redirect / `$()`, emits exact bytes — no trailing newline added. Interactive at a terminal: appends one trailing newline if missing, so the next shell prompt isn't glued to the value. Same auto-detection as `git`, `jq`, `ls --color=auto`.
 
-`unset <env> KEY`
+`unset @<env> KEY`
 > Delete one key. Just `rm`.
 
-`list <env>`
+`list @<env>`
 > List key names. Doesn't need the passphrase — `ls` minus the extension.
 
-`edit <env> KEY`
+`edit @<env> KEY`
 > Decrypt to a tmpfile (mode 600 in `$TMPDIR`), invoke `$VISUAL` or `$EDITOR` or `vi`, re-encrypt on exit. The tmpfile is cleaned via `trap` on `EXIT INT TERM HUP`. If the editor closes without changes, the encrypted file is not rewritten.
 
-`run <env> CMD [args]`
+`run @<env> CMD [args]`
 > Decrypt every value in the env, export each as a shell variable, then `exec` CMD with the env injected. PBKDF2 runs once per call, not once per key. `xenv @<env> CMD [args]` is the screaming-loud shorthand: `xenv @production ./deploy`. With **no** CMD, `xenv @<env>` decrypts everything and prints `KEY=value` lines to stdout — same shape as `env(1)` — letting you peek at the loaded env without exec'ing anything.
 
 `help`, `version`
@@ -110,7 +134,7 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` 3.0+, `awk`, `mkt
 > Per-project state lives under `$XDG_CONFIG_HOME/xenv/projects/<id>/`. Default: `~/.config`.
 
 `TMPDIR`
-> Used by `xenv edit` and `xenv rotate` for their plaintext stashes. Default: `/tmp`.
+> Used by `xenv edit` and `xenv key rotate` for their plaintext stashes. Default: `/tmp`.
 
 ## FILES
 
@@ -118,10 +142,10 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` 3.0+, `awk`, `mkt
 > Project state. YAML frontmatter holds `version` and `id`. Body is yours.
 
 `xenv/bin/xenv`
-> Self-contained copy of the script, written at `xenv init` so the project is portable.
+> Self-contained copy of the script, written at `xenv setup` so the project is portable.
 
 `xenv/envs/<env>/README.md`
-> Per-env state. YAML frontmatter holds `version`, `iter`, `salt`. Body is yours; survives `xenv rotate` verbatim.
+> Per-env state. YAML frontmatter holds `version`, `iter`, `salt`. Body is yours; survives `xenv key rotate` verbatim.
 
 `xenv/envs/<env>/<KEY>.value.enc`
 > One encrypted value per file. Format: `xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>`.
@@ -130,10 +154,10 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` 3.0+, `awk`, `mkt
 > Mode-600 passphrase, file backend. Never in the repo.
 
 `~/.config/xenv/projects/<id>/origin`
-> Absolute path of `xenv/` at the time of `init`. Informational.
+> Absolute path of `xenv/` at the time of `setup`. Informational.
 
 `~/.config/xenv/projects/<id>/notes.md`
-> Per-project notebook. Survives `rm -rf xenv/` and re-init.
+> Per-project notebook. Survives `rm -rf xenv/` and re-setup.
 
 ## EXIT STATUS
 
@@ -154,10 +178,27 @@ git clone https://github.com/ahoward/xenv && cp xenv/bin/xenv ~/bin/ && chmod +x
 Bootstrap and use:
 
 ```sh
-xenv init
-xenv set production API_KEY=sk-abc
-xenv get production API_KEY
+xenv setup
+xenv set @production API_KEY=sk-abc
+xenv get @production API_KEY
 xenv @production ./server
+```
+
+Adopt an existing vault (just cloned a teammate's repo):
+
+```sh
+# interactive: prompts per env for the passphrase
+xenv setup
+
+# CI / scripted: each env's passphrase from its env var
+XENV_KEY_PRODUCTION=$SECRET xenv setup
+```
+
+Pin a passphrase against an existing vault:
+
+```sh
+xenv key set @production           # prompts with no-echo
+echo "$SECRET" | xenv key set @production    # from stdin
 ```
 
 Peek at the loaded env (no CMD — just prints KEY=value lines):
@@ -172,13 +213,13 @@ xenv @production
 Pipe binary or multi-line values in from a file:
 
 ```sh
-xenv set production TLS_KEY < server.pem
+xenv set @production TLS_KEY < server.pem
 ```
 
 Round-trip in a script:
 
 ```sh
-db=$(xenv get production DATABASE_URL)
+db=$(xenv get @production DATABASE_URL)
 ```
 
 CI deploy with the env injected:
@@ -190,7 +231,7 @@ XENV_KEY_PRODUCTION=$SECRET xenv @production ./deploy
 Safe error handling:
 
 ```sh
-if v=$(xenv get production API_KEY 2>/dev/null); then
+if v=$(xenv get @production API_KEY 2>/dev/null); then
     use_it "$v"
 else
     echo "couldn't fetch API_KEY" >&2

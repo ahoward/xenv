@@ -1,7 +1,7 @@
 #!/bin/sh
 # xenv — per-key encrypted environment store
 #
-# Project layout (after `xenv init`):
+# Project layout (after `xenv setup`):
 #
 #   xenv
 #   ├── README.md                  — frontmatter (project id) + docs
@@ -40,7 +40,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.7.2-posix"
+XENV_VERSION="0.8.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
@@ -154,7 +154,7 @@ new_project_id() {
 # errors if missing or malformed.
 read_project_id() {
   rf="$XENV_DIR/$XENV_README_FILE"
-  [ -f "$rf" ] || { err "no $rf — run 'xenv init'"; return 1; }
+  [ -f "$rf" ] || { err "no $rf — run 'xenv setup'"; return 1; }
 
   ver=""; id=""
   while read -r k v; do
@@ -377,7 +377,7 @@ read_frontmatter() {
 read_params() {
   env_name=$1
   rf=$(readme_file "$env_name")
-  [ -f "$rf" ] || { err "no README for '$env_name' — run 'xenv keygen $env_name' first"; return 1; }
+  [ -f "$rf" ] || { err "no README for '$env_name' — run 'xenv key generate @$env_name' first"; return 1; }
 
   ver=""; iter=""; salt_hex=""
   while read -r k v; do
@@ -413,7 +413,7 @@ write_frontmatter() {
   cat <<EOF
 ---
 # xenv crypto state — DO NOT EDIT — managed by xenv
-# changing these breaks decryption. rotate with: xenv rotate $env_name
+# changing these breaks decryption. rotate with: xenv key rotate @$env_name
 version: $XENV_VAULT_VERSION
 iter: $iter
 salt: $salt_hex
@@ -472,7 +472,7 @@ require_key() {
     id=$(read_project_id 2>/dev/null || printf '(no project)')
     err "no key for '$env_name' (project: $id)"
     err "tried: \$$vname, \$XENV_KEY, $XENV_PROJECTS_DIR/$id/keys/$env_name, keychain, pass"
-    err "run 'xenv keygen $env_name' to generate one"
+    err "run 'xenv key generate @$env_name' to generate one, or 'xenv key set @$env_name' to provide one"
     return 1
   }
   printf '%s' "$key"
@@ -604,12 +604,12 @@ at `xenv/bin/xenv` inside *this* project — a self-contained copy.
 ## for humans
 
 ```sh
-xenv list <env>                    # show variable names
-xenv get  <env> KEY                # decrypt one value (silent on success)
-xenv set  <env> KEY=value          # store a value
-xenv set  <env> KEY < file         # store a multi-line/binary value
-xenv edit <env> KEY                # decrypt → $EDITOR → re-encrypt
-xenv run  <env> CMD [args]         # run a command with the env injected
+xenv list @<env>                   # show variable names
+xenv get  @<env> KEY               # decrypt one value (silent on success)
+xenv set  @<env> KEY=value         # store a value
+xenv set  @<env> KEY < file        # store a multi-line/binary value
+xenv edit @<env> KEY               # decrypt → $EDITOR → re-encrypt
+xenv run  @<env> CMD [args]        # run a command with the env injected
 xenv @<env>    CMD [args]          # shorthand: `xenv @production ./server`
 xenv @<env>                        # no CMD: print KEY=value lines for the env
 ```
@@ -640,15 +640,15 @@ checkout to a local keys directory. It is safe to commit.
 
 To add a new value:
 
-    xenv set <env> KEY=value
+    xenv set @<env> KEY=value
 
 To read one (script-safe, silent on success):
 
-    xenv get <env> KEY
+    xenv get @<env> KEY
 
 To run a command with all the env's vars injected:
 
-    xenv run <env> ./your-command
+    xenv run @<env> ./your-command
 
 **Never** decrypt to a plaintext file you might `git add`. There's
 no need — use `xenv get` (in-memory) or `xenv run` (exec-time).
@@ -685,7 +685,7 @@ If this tool ever disappeared, your data wouldn't.
         │   └── README.md
         ├── production
         │   ├── APP_ENV.value.enc  ← one encrypted variable per file
-        │   ├── …                  ← (add more with `xenv set production K=v`)
+        │   ├── …                  ← (add more with `xenv set @production K=v`)
         │   └── README.md          ← frontmatter (KDF params) + per-env docs
         ├── staging
         │   ├── APP_ENV.value.enc
@@ -745,48 +745,109 @@ cmd_help() {
 xenv — per-key encrypted environment store
 
 usage:
-  xenv init                          create xenv/ with 4 default envs
-  xenv envs                          list environments
-  xenv keygen <env> [--keychain|--pass|--file]
-                                     create env dir + passphrase
-  xenv rotate <env>                  rotate passphrase, re-encrypt all keys
+  xenv setup                         bootstrap: create xenv/ (if absent),
+                                     or adopt existing (prompts per env)
+  xenv environments                  list environments
+  xenv help | version
 
-  xenv set    <env> KEY=value        store a value
-  xenv set    <env> KEY              read value from stdin (multi-line OK)
-  xenv get    <env> KEY              decrypt one key (silent on success)
-  xenv unset  <env> KEY              delete a key
-  xenv list   <env>                  list key names (no decryption)
-  xenv edit   <env> KEY              decrypt → $VISUAL/$EDITOR → re-encrypt
+  xenv key generate @<env> [--keychain|--pass|--file]
+                                     create env dir + generate passphrase
+  xenv key set      @<env> [--keychain|--pass|--file]
+                                     read passphrase from stdin/tty,
+                                     MAC-verify, cache
+  xenv key rotate   @<env>           new passphrase + re-encrypt all keys
+  xenv key show     @<env> [--reveal]
+                                     show storage location (or value)
+  xenv key forget   @<env>           rm cached passphrase, leave vault
 
-  xenv run    <env> CMD [args]       run command with all keys exported
-  xenv @<env>      CMD [args]        shorthand for run (e.g. `xenv @prod ./deploy`)
-  xenv @<env>                        no CMD: print KEY=value lines for the env
+  xenv set    @<env> KEY=value       store a value
+  xenv set    @<env> KEY             read value from stdin (multi-line OK)
+  xenv get    @<env> KEY             decrypt one key (silent on success)
+  xenv unset  @<env> KEY             delete a key
+  xenv list   @<env>                 list key names (no decryption)
+  xenv edit   @<env> KEY             decrypt → $VISUAL/$EDITOR → re-encrypt
 
-  xenv help / version
+  xenv run    @<env> CMD [args]      run command with all keys exported
+  xenv @<env>      CMD [args]        shorthand for run
+  xenv @<env>                        no CMD: print KEY=value lines
 
 each env is a directory: xenv/envs/<env>/
 each variable is one file: xenv/envs/<env>/KEY.value.enc
 KDF params live in the per-env README's YAML frontmatter (safe to commit)
 
-key lookup (first hit wins):
+argv contract: @<env> can appear ANYWHERE in argv. these are equivalent:
+  xenv get @production API_KEY
+  xenv @production get API_KEY
+  xenv get API_KEY @production
+
+passphrase lookup (first hit wins):
   $XENV_KEY_<ENV> → $XENV_KEY → ~/.config/xenv/projects/<id>/keys/<env>
-  → macOS keychain (xenv/<env>) → pass (xenv/<env>)
+  → macOS keychain (xenv/<id>/<env>) → pass (xenv/<id>/<env>)
 USAGE
 }
 
 cmd_version() { printf 'xenv %s\n' "$XENV_VERSION"; }
 
-cmd_init() {
-  [ -d "$XENV_DIR" ] && die "$XENV_DIR/ already exists — delete it to re-init"
+# read a passphrase from stdin or tty. If stdin is a tty, prompt with
+# no-echo via stty(1). Otherwise read one line from stdin (CI / piped).
+# prints the passphrase on stdout (no trailing newline).
+read_passphrase() {
+  prompt=$1
+  if [ -t 0 ] && [ -t 2 ]; then
+    # interactive: prompt to stderr, read with no-echo
+    printf '%s' "$prompt" >&2
+    stty -echo 2>/dev/null
+    IFS= read -r pp
+    rc=$?
+    stty echo 2>/dev/null
+    printf '\n' >&2
+    [ $rc -eq 0 ] || return 1
+    printf '%s' "$pp"
+  else
+    # non-tty: read one line. POSIX read returns non-zero on EOF
+    # without trailing newline, but still assigns the partial input
+    # to the variable. So we accept either: any non-empty $pp counts.
+    pp=
+    IFS= read -r pp || true
+    [ -n "$pp" ] || return 1
+    printf '%s' "$pp"
+  fi
+}
 
+# verify_passphrase <env> <passphrase> — try decrypting one .value.enc
+# in the env with the given passphrase. Returns 0 if MAC verifies, 1
+# otherwise. Returns 2 if the env has no values to verify against
+# (caller decides what to do — usually "warn + accept").
+verify_passphrase() {
+  env_name=$1
+  passphrase=$2
+  dir=$(env_dir "$env_name")
+  [ -d "$dir" ] || return 1
+
+  params=$(read_params "$env_name") || return 1
+  iter=${params%% *}
+  salt_hex=${params#* }
+  read -r enc_key mac_key <<EOF
+$(derive_keys "$passphrase" "$salt_hex" "$iter")
+EOF
+  [ -n "$enc_key" ] || return 1
+
+  for f in "$dir"/*"$XENV_VALUE_EXT"; do
+    [ -f "$f" ] || continue
+    decrypt_value "$enc_key" "$mac_key" < "$f" >/dev/null 2>&1 && return 0
+    return 1   # MAC failed on the first value we tried
+  done
+  return 2   # no values to verify against
+}
+
+# bootstrap a fresh project: write tree, generate or honor pinned
+# passphrases, stash keys. Called by cmd_setup when ./xenv/ is absent.
+setup_fresh() {
   mkdir -p "$XENV_DIR/bin" "$XENV_DIR/envs"
 
-  # write the top-level README with the project id in its frontmatter
-  # FIRST — everything downstream (store_key, etc) reads the id from there.
   project_id=$(new_project_id)
   write_top_readme "$project_id"
 
-  # bootstrap the per-project config dir: keys/, origin, notes.md
   origin=$(cd "$XENV_DIR" && pwd)
   init_project_dir "$project_id" "$origin"
 
@@ -800,30 +861,124 @@ cmd_init() {
     || die "could not copy $self → $XENV_DIR/bin/xenv"
   chmod +x "$XENV_DIR/bin/xenv"
 
-  # set up each default env: dir + README (with KDF params in frontmatter) +
-  # passphrase + APP_ENV starter value. README first — read_params needs it.
+  # set up each default env: dir + README + passphrase + APP_ENV
   for env_name in $XENV_DEFAULT_ENVS; do
     init_env_dir "$env_name"
 
     salt_hex=$(openssl rand -hex "$XENV_SALT_BYTES")
     write_env_readme "$env_name" "$XENV_ITER" "$salt_hex"
 
-    key=$(openssl rand -base64 32 | tr -d '\n')
+    # honor $XENV_KEY_<ENV> or $XENV_KEY if set — lets users pin a
+    # passphrase from the start without overwriting a generated one.
+    pinned=$(lookup_pinned_passphrase "$env_name")
+    if [ -n "$pinned" ]; then
+      key=$pinned
+      info "$env_name: using pinned passphrase from env var"
+    else
+      key=$(openssl rand -base64 32 | tr -d '\n')
+    fi
     store_key "$env_name" "$key" file >/dev/null 2>&1
 
     write_value "$env_name" "APP_ENV" "$env_name" \
       || die "could not write APP_ENV for $env_name"
   done
 
-  info "initialized $XENV_DIR/ with envs: $XENV_DEFAULT_ENVS"
+  info "set up $XENV_DIR/ with envs: $XENV_DEFAULT_ENVS"
   info "project id: $project_id"
   info "passphrases live in $XENV_PROJECTS_DIR/$project_id/keys/"
   info "your notes: $XENV_PROJECTS_DIR/$project_id/notes.md"
-  info "each env starts with APP_ENV — try: xenv get development APP_ENV"
+  info "each env starts with APP_ENV — try: xenv get @development APP_ENV"
 }
 
-cmd_envs() {
-  [ -d "$XENV_DIR/envs" ] || { info "no $XENV_DIR/ — run 'xenv init'"; return 0; }
+# lookup_pinned_passphrase <env> — return $XENV_KEY_<ENV> or $XENV_KEY
+# if set in the environment, else empty. Used by setup to honor
+# user-pinned passphrases instead of always generating random.
+lookup_pinned_passphrase() {
+  env_name=$1
+  vname=$(env_var_name "$env_name")
+  eval "v=\${$vname:-}"
+  [ -n "$v" ] && { printf '%s' "$v"; return 0; }
+  [ -n "${XENV_KEY:-}" ] && { printf '%s' "$XENV_KEY"; return 0; }
+  return 1
+}
+
+# adopt an existing xenv/ tree: walk each env that has values, prompt
+# for the passphrase (or honor $XENV_KEY_<ENV>), MAC-verify, cache.
+setup_adopt() {
+  project_id=$(read_project_id) || die "no project id in $XENV_DIR/README.md — corrupt repo?"
+
+  origin=$(cd "$XENV_DIR" && pwd)
+  init_project_dir "$project_id" "$origin"
+
+  info "adopting existing $XENV_DIR/ (project id: $project_id)"
+
+  # walk envs/ alphabetically
+  found_any=0
+  for d in "$XENV_DIR"/envs/*/; do
+    [ -d "$d" ] || continue
+    env_name=${d%/}; env_name=${env_name##*/}
+    found_any=1
+    setup_adopt_one "$env_name"
+  done
+
+  if [ $found_any -eq 0 ]; then
+    info "$XENV_DIR/envs/ is empty — nothing to adopt"
+  fi
+}
+
+setup_adopt_one() {
+  env_name=$1
+
+  # if pinned via env var, use it; otherwise prompt
+  pinned=$(lookup_pinned_passphrase "$env_name")
+  if [ -n "$pinned" ]; then
+    pp=$pinned
+    via="\$$(env_var_name "$env_name") / \$XENV_KEY"
+  else
+    if [ ! -t 0 ] || [ ! -t 2 ]; then
+      info "$env_name: skipped (non-tty stdin and no \$$(env_var_name "$env_name") set)"
+      return 0
+    fi
+    pp=$(read_passphrase "passphrase for @$env_name: ") || {
+      info "$env_name: skipped (read aborted)"
+      return 0
+    }
+    via="prompt"
+    [ -z "$pp" ] && { info "$env_name: skipped (empty passphrase)"; return 0; }
+  fi
+
+  # MAC-verify before caching
+  verify_passphrase "$env_name" "$pp"
+  case $? in
+    0)
+      store_key "$env_name" "$pp" file >/dev/null 2>&1
+      info "$env_name: verified via $via, cached"
+      ;;
+    1)
+      err "$env_name: passphrase did NOT match (MAC verify failed). NOT cached."
+      ;;
+    2)
+      # no values to verify against — store the passphrase but warn
+      store_key "$env_name" "$pp" file >/dev/null 2>&1
+      info "$env_name: no values to MAC-verify against. Cached without verification."
+      ;;
+  esac
+}
+
+cmd_setup() {
+  if [ -d "$XENV_DIR" ]; then
+    # existing tree — adopt path
+    [ -f "$XENV_DIR/$XENV_README_FILE" ] \
+      || die "$XENV_DIR/ exists but no $XENV_README_FILE — corrupt? delete or fix manually"
+    setup_adopt
+  else
+    # fresh tree — bootstrap path
+    setup_fresh
+  fi
+}
+
+cmd_environments() {
+  [ -d "$XENV_DIR/envs" ] || { info "no $XENV_DIR/ — run 'xenv setup'"; return 0; }
   found=0
   for d in "$XENV_DIR"/envs/*/; do
     [ -d "$d" ] || continue
@@ -836,16 +991,16 @@ cmd_envs() {
     fi
   done
   if [ $found -eq 0 ]; then
-    info "no environments yet — run 'xenv keygen <env>'"
+    info "no environments yet — run 'xenv key generate @<env>'"
   fi
 }
 
-cmd_keygen() {
+cmd_key_generate() {
   env_name=$1
   backend=${2:-auto}
 
   if [ -d "$(env_dir "$env_name")" ]; then
-    die "env '$env_name' already exists — use 'xenv rotate $env_name' to change keys"
+    die "env '$env_name' already exists — use 'xenv key rotate @$env_name' to change keys"
   fi
 
   init_env_dir "$env_name"
@@ -858,7 +1013,115 @@ cmd_keygen() {
   printf '\nfor CI, set this secret:\n  %s=%s\n' "$(env_var_name "$env_name")" "$key" >&2
 }
 
-cmd_rotate() {
+# accept a passphrase from stdin/tty, MAC-verify against existing values,
+# cache to the requested backend (default: file). Refuses to cache if the
+# passphrase doesn't decrypt the existing values, unless --force.
+cmd_key_set() {
+  env_name=$1
+  backend=${2:-auto}
+
+  dir=$(env_dir "$env_name")
+  [ -d "$dir" ] || die "no env '$env_name' — run 'xenv key generate @$env_name' first"
+
+  force=0
+  case "$backend" in
+    --force) backend=auto; force=1 ;;
+  esac
+
+  pp=$(read_passphrase "passphrase for @$env_name: ") || die "no passphrase read"
+  [ -n "$pp" ] || die "empty passphrase"
+
+  verify_passphrase "$env_name" "$pp"
+  case $? in
+    0)
+      store_key "$env_name" "$pp" "$backend"
+      ;;
+    1)
+      if [ "$force" -eq 1 ]; then
+        store_key "$env_name" "$pp" "$backend"
+        err "$env_name: passphrase did NOT match existing values, but --force given. Cached anyway."
+      else
+        die "$env_name: passphrase did NOT match existing values (MAC verify failed). Re-run with --force to cache anyway."
+      fi
+      ;;
+    2)
+      store_key "$env_name" "$pp" "$backend"
+      info "$env_name: no values to MAC-verify against. Cached without verification."
+      ;;
+  esac
+}
+
+# print where the passphrase is stored. With --reveal, print the value.
+cmd_key_show() {
+  env_name=$1
+  reveal=0
+  case "${2:-}" in
+    --reveal) reveal=1 ;;
+  esac
+
+  id=$(read_project_id) || die "no project id — no $XENV_DIR/$XENV_README_FILE"
+
+  if [ "$reveal" -eq 1 ]; then
+    # actually fetch the passphrase (any backend the resolver finds)
+    pp=$(require_key "$env_name") || exit 1
+    printf '%s\n' "$pp"
+    return 0
+  fi
+
+  # describe where it lives
+  vname=$(env_var_name "$env_name")
+  eval "v=\${$vname:-}"
+  if [ -n "$v" ]; then
+    printf 'env-var: \$%s (set)\n' "$vname"
+    return 0
+  fi
+  if [ -n "${XENV_KEY:-}" ]; then
+    printf 'env-var: \$XENV_KEY (set, global fallback)\n'
+    return 0
+  fi
+
+  f="$XENV_PROJECTS_DIR/$id/keys/$env_name"
+  if [ -r "$f" ]; then
+    printf 'file: %s\n' "$f"
+    return 0
+  fi
+  if command -v security >/dev/null 2>&1 && \
+     security find-generic-password -s xenv -a "$id/$env_name" >/dev/null 2>&1; then
+    printf 'keychain: service=xenv, account=%s/%s\n' "$id" "$env_name"
+    return 0
+  fi
+  if command -v pass >/dev/null 2>&1 && \
+     pass show "xenv/$id/$env_name" >/dev/null 2>&1; then
+    printf 'pass: xenv/%s/%s\n' "$id" "$env_name"
+    return 0
+  fi
+  die "no passphrase found for @$env_name in any backend"
+}
+
+# remove the cached passphrase from local storage. Leaves the vault.
+cmd_key_forget() {
+  env_name=$1
+  id=$(read_project_id) || die "no project id"
+
+  removed=0
+  f="$XENV_PROJECTS_DIR/$id/keys/$env_name"
+  if [ -e "$f" ]; then
+    rm -f "$f" && { info "removed file: $f"; removed=1; }
+  fi
+  if command -v security >/dev/null 2>&1 && \
+     security find-generic-password -s xenv -a "$id/$env_name" >/dev/null 2>&1; then
+    security delete-generic-password -s xenv -a "$id/$env_name" >/dev/null 2>&1 \
+      && { info "removed keychain entry: $id/$env_name"; removed=1; }
+  fi
+  if command -v pass >/dev/null 2>&1 && \
+     pass show "xenv/$id/$env_name" >/dev/null 2>&1; then
+    pass rm -f "xenv/$id/$env_name" >/dev/null 2>&1 \
+      && { info "removed pass entry: xenv/$id/$env_name"; removed=1; }
+  fi
+  [ $removed -eq 1 ] || info "no cached passphrase found for @$env_name (already forgotten?)"
+}
+
+cmd_key_rotate() {
   env_name=$1
   dir=$(env_dir "$env_name")
   [ -d "$dir" ] || die "no env '$env_name'"
@@ -921,7 +1184,7 @@ cmd_set() {
   env_name=$1
   arg=$2
   dir=$(env_dir "$env_name")
-  [ -d "$dir" ] || die "no env '$env_name' — run 'xenv keygen $env_name' first"
+  [ -d "$dir" ] || die "no env '$env_name' — run 'xenv key generate @$env_name' first"
 
   case "$arg" in
     *=*)
@@ -1087,65 +1350,127 @@ EOF
 }
 
 # ── dispatch ──────────────────────────────────────────────────────
+#
+# argv contract: an `@<env>` token may appear anywhere in argv. The
+# pre-scan extracts the first such token (sets $env_name from it) and
+# removes it from the remaining argv. Verbs that need an env get it
+# from $env_name; verbs that don't (setup, environments, help) ignore.
+#
+# Examples — all equivalent:
+#   xenv get @production API_KEY
+#   xenv @production get API_KEY
+#   xenv get API_KEY @production
+#
+# Today the canonical form in docs is `xenv get @production API_KEY`
+# (env first after verb), but any position works.
+
+# subverb dispatcher for `xenv key ...`
+cmd_key() {
+  sub=${1:-}
+  [ -n "$sub" ] || die "key needs a subverb: generate | set | rotate | show | forget"
+  shift
+
+  [ -n "$env_name" ] || die "key $sub needs an env: 'xenv key $sub @<env>'"
+
+  case "$sub" in
+    generate) cmd_key_generate "$env_name" "${1:-auto}" ;;
+    set)      cmd_key_set      "$env_name" "${1:-auto}" ;;
+    rotate)   cmd_key_rotate   "$env_name" ;;
+    show)     cmd_key_show     "$env_name" "${1:-}" ;;
+    forget)   cmd_key_forget   "$env_name" ;;
+    *)        die "unknown key subverb: $sub (try: generate | set | rotate | show | forget)" ;;
+  esac
+}
 
 main() {
-  cmd=${1:-help}
+  # pre-scan argv: extract the FIRST @<env> token, removing it from
+  # argv. Subsequent @<env> tokens stay in argv as ordinary tokens
+  # (a value starting with @ is preserved only if it's not the first
+  # such token in argv — unavoidable corner case for now).
+  env_name=
+  found=0
+  new_argv_count=0
+  for a in "$@"; do
+    if [ "$found" -eq 0 ]; then
+      case "$a" in
+        @?*)
+          env_name=${a#@}
+          found=1
+          continue
+          ;;
+      esac
+    fi
+    new_argv_count=$((new_argv_count + 1))
+    eval "new_argv_${new_argv_count}=\$a"
+  done
+  # reset $@ to the cleaned argv
+  set --
+  i=1
+  while [ "$i" -le "$new_argv_count" ]; do
+    eval "set -- \"\$@\" \"\$new_argv_$i\""
+    i=$((i + 1))
+  done
+
+  cmd=${1:-}
+  [ -n "$cmd" ] && shift
+
+  # `xenv` with no verb but with @env → print the env (run-no-cmd)
+  if [ -z "$cmd" ]; then
+    if [ -n "$env_name" ]; then
+      cmd_envdump "$env_name"
+      return $?
+    fi
+    cmd_help
+    return $?
+  fi
+
   case "$cmd" in
     -h|--help|help)         cmd_help ;;
     -v|--version|version)   cmd_version ;;
-    init)                   cmd_init ;;
-    envs)                   cmd_envs ;;
-    keygen)
-      shift; [ $# -ge 1 ] || die "keygen needs an env name"
-      cmd_keygen "$1" "${2:-auto}"
-      ;;
-    rotate)
-      shift; [ $# -ge 1 ] || die "rotate needs an env name"
-      cmd_rotate "$1"
-      ;;
+    setup)                  cmd_setup ;;
+    environments)           cmd_environments ;;
+    key)                    cmd_key "$@" ;;
+
     set)
-      shift; [ $# -ge 2 ] || die "set needs <env> KEY=VALUE or <env> KEY (stdin)"
-      cmd_set "$1" "$2"
+      [ -n "$env_name" ] || die "set needs an env: 'xenv set @<env> KEY=VALUE' (or KEY for stdin)"
+      [ $# -ge 1 ] || die "set needs KEY=VALUE or KEY (stdin)"
+      cmd_set "$env_name" "$1"
       ;;
     unset)
-      shift; [ $# -ge 2 ] || die "unset needs <env> KEY"
-      cmd_unset "$1" "$2"
+      [ -n "$env_name" ] || die "unset needs an env: 'xenv unset @<env> KEY'"
+      [ $# -ge 1 ] || die "unset needs KEY"
+      cmd_unset "$env_name" "$1"
       ;;
     list)
-      shift; [ $# -ge 1 ] || die "list needs an env name"
-      cmd_list "$1"
+      [ -n "$env_name" ] || die "list needs an env: 'xenv list @<env>'"
+      cmd_list "$env_name"
       ;;
     get)
-      shift; [ $# -ge 2 ] || die "get needs <env> KEY"
-      cmd_get "$1" "$2"
+      [ -n "$env_name" ] || die "get needs an env: 'xenv get @<env> KEY'"
+      [ $# -ge 1 ] || die "get needs KEY"
+      cmd_get "$env_name" "$1"
       ;;
     edit)
-      shift; [ $# -ge 2 ] || die "edit needs <env> KEY"
-      cmd_edit "$1" "$2"
+      [ -n "$env_name" ] || die "edit needs an env: 'xenv edit @<env> KEY'"
+      [ $# -ge 1 ] || die "edit needs KEY"
+      cmd_edit "$env_name" "$1"
       ;;
     run)
-      shift; cmd_run "$@"
+      [ -n "$env_name" ] || die "run needs an env: 'xenv run @<env> CMD [args]'"
+      [ $# -ge 1 ] || die "run needs a command"
+      cmd_run "$env_name" "$@"
       ;;
-    @*)
-      # `xenv @<env> CMD [args]` — shorthand for `xenv run <env> CMD [args]`.
-      # `xenv @<env>` (no CMD) — print KEY=value lines for the env's loaded
-      # values, one per line. Same shape as env(1)'s output.
-      #
-      # The @ is a screamingly-visible "this is an env reference" marker
-      # that can't be confused with a subcommand.
-      env_name=${cmd#@}
-      [ -n "$env_name" ] || die "empty env name after '@'"
-      shift
-      if [ $# -ge 1 ]; then
-        cmd_run "$env_name" "$@"
-      else
-        cmd_envdump "$env_name"
-      fi
-      ;;
+
     *)
-      err "unknown command: $cmd"
-      err "try 'xenv help'"
-      exit 1
+      # If we have an env but the "verb" isn't known, treat it as a
+      # command to exec (the `xenv @<env> CMD [args]` shorthand).
+      if [ -n "$env_name" ]; then
+        cmd_run "$env_name" "$cmd" "$@"
+      else
+        err "unknown command: $cmd"
+        err "try 'xenv help'"
+        exit 1
+      fi
       ;;
   esac
 }

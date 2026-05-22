@@ -85,7 +85,7 @@ exercise() {
     FAIL=$((FAIL + 1)); return
   }
   # Use the canonical shell tool to decrypt what the recipe just wrote.
-  cross=$(cd "$tmp" && XENV_KEY_PRODUCTION="$DEMO_KEY" "$XENV_BIN" get production CROSSCHECK 2>&1)
+  cross=$(cd "$tmp" && XENV_KEY_PRODUCTION="$DEMO_KEY" "$XENV_BIN" get @production CROSSCHECK 2>&1)
   assert "$name set+xenv cross-decrypt" "from $name" "$cross"
 
   # ── tamper rejection: flip the last hex char of HELLO's MAC

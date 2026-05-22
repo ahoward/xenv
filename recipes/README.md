@@ -71,7 +71,7 @@ Recipes find `<root>/xenv/` via `$XENV_ROOT` (default `./xenv/` relative to cwd)
 ```yaml
 ---
 # xenv crypto state — DO NOT EDIT — managed by xenv
-# changing these breaks decryption. rotate with: xenv rotate <env>
+# changing these breaks decryption. rotate with: xenv key rotate @<env>
 version: v3
 iter: 200000
 salt: a449a01266a1adf926a541ecd72dd2c2
