@@ -40,7 +40,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.8.0-posix"
+XENV_VERSION="0.9.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
@@ -438,28 +438,48 @@ env_var_name() {
   printf 'XENV_KEY_%s' "$(printf '%s' "$1" | tr '[:lower:]-' '[:upper:]_')"
 }
 
+# lookup_key <env> — find the passphrase for <env>, walking the cascade:
+#
+#   1. $XENV_KEY_<ENV>                            env-specific env var
+#   2. $XENV_KEY                                  project-wide env var
+#   3. keys/<env>.key                             env-specific file
+#   4. keys/_global.key                           project-wide file
+#   5. macOS keychain xenv/<id>/<env>             env-specific keychain
+#   6. macOS keychain xenv/<id>/_global           project-wide keychain
+#   7. pass xenv/<id>/<env>                       env-specific pass
+#   8. pass xenv/<id>/_global                     project-wide pass
+#
+# Env-specific beats global within each backend class. First non-empty
+# slot wins. Returns the raw passphrase on stdout, or non-zero if none.
 lookup_key() {
   env_name=$1
   vname=$(env_var_name "$env_name")
+
   eval "val=\${$vname:-}"
   [ -n "$val" ] && { printf '%s' "$val"; return 0; }
   [ -n "${XENV_KEY:-}" ] && { printf '%s' "$XENV_KEY"; return 0; }
 
-  # all subsequent backends are scoped by the project id, so two projects
-  # with envs of the same name never share keys.
+  # the rest are project-scoped, so two projects with same env names
+  # never share keys.
   id=$(read_project_id 2>/dev/null) || return 1
 
-  f="$XENV_PROJECTS_DIR/$id/keys/$env_name"
-  [ -r "$f" ] && { cat "$f"; return 0; }
+  for stem in "$env_name" "_global"; do
+    f="$XENV_PROJECTS_DIR/$id/keys/$stem.key"
+    [ -r "$f" ] && { cat "$f"; return 0; }
+  done
 
   if command -v security >/dev/null 2>&1; then
-    val=$(security find-generic-password -s xenv -a "$id/$env_name" -w 2>/dev/null) || true
-    [ -n "$val" ] && { printf '%s\n' "$val"; return 0; }
+    for stem in "$env_name" "_global"; do
+      val=$(security find-generic-password -s xenv -a "$id/$stem" -w 2>/dev/null) || true
+      [ -n "$val" ] && { printf '%s\n' "$val"; return 0; }
+    done
   fi
 
   if command -v pass >/dev/null 2>&1; then
-    val=$(pass show "xenv/$id/$env_name" 2>/dev/null) || true
-    [ -n "$val" ] && { printf '%s\n' "$val"; return 0; }
+    for stem in "$env_name" "_global"; do
+      val=$(pass show "xenv/$id/$stem" 2>/dev/null) || true
+      [ -n "$val" ] && { printf '%s\n' "$val"; return 0; }
+    done
   fi
 
   return 1
@@ -471,13 +491,17 @@ require_key() {
     vname=$(env_var_name "$env_name")
     id=$(read_project_id 2>/dev/null || printf '(no project)')
     err "no key for '$env_name' (project: $id)"
-    err "tried: \$$vname, \$XENV_KEY, $XENV_PROJECTS_DIR/$id/keys/$env_name, keychain, pass"
+    err "tried: \$$vname, \$XENV_KEY, $XENV_PROJECTS_DIR/$id/keys/{$env_name,_global}.key, keychain, pass"
     err "run 'xenv key generate @$env_name' to generate one, or 'xenv key set @$env_name' to provide one"
     return 1
   }
   printf '%s' "$key"
 }
 
+# store_key <env-or-_global> <passphrase> <backend>
+#
+# Pass the literal string "_global" as the first arg to write the
+# project-wide key. Otherwise the env name. Backend "auto" means file.
 store_key() {
   env_name=$1
   key=$2
@@ -507,9 +531,9 @@ store_key() {
       mkdir -p "$pdir/keys"
       chmod 700 "$XENV_CONFIG" "$XENV_PROJECTS_DIR" "$pdir" "$pdir/keys" 2>/dev/null || true
       umask 077
-      printf '%s\n' "$key" > "$pdir/keys/$env_name"
-      chmod 600 "$pdir/keys/$env_name"
-      info "key stored at $pdir/keys/$env_name (mode 600)"
+      printf '%s\n' "$key" > "$pdir/keys/$env_name.key"
+      chmod 600 "$pdir/keys/$env_name.key"
+      info "key stored at $pdir/keys/$env_name.key (mode 600)"
       ;;
     *) die "unknown backend: $backend" ;;
   esac
@@ -750,15 +774,17 @@ usage:
   xenv environments                  list environments
   xenv help | version
 
-  xenv key generate @<env> [--keychain|--pass|--file]
-                                     create env dir + generate passphrase
-  xenv key set      @<env> [--keychain|--pass|--file]
+  xenv key generate [@<env>] [--keychain|--pass|--file]
+                                     generate a passphrase (no @env: global)
+  xenv key set      [@<env>] [--keychain|--pass|--file] [--force]
                                      read passphrase from stdin/tty,
-                                     MAC-verify, cache
-  xenv key rotate   @<env>           new passphrase + re-encrypt all keys
-  xenv key show     @<env> [--reveal]
+                                     MAC-verify, cache (no @env: global)
+  xenv key rotate   [@<env>]         rotate passphrase + re-encrypt
+                                     (no @env: rotate _global, affects only
+                                     envs without a per-env key)
+  xenv key show     [@<env>] [--reveal]
                                      show storage location (or value)
-  xenv key forget   @<env>           rm cached passphrase, leave vault
+  xenv key forget   [@<env>]         rm cached passphrase, leave vault
 
   xenv set    @<env> KEY=value       store a value
   xenv set    @<env> KEY             read value from stdin (multi-line OK)
@@ -780,9 +806,18 @@ argv contract: @<env> can appear ANYWHERE in argv. these are equivalent:
   xenv @production get API_KEY
   xenv get API_KEY @production
 
-passphrase lookup (first hit wins):
-  $XENV_KEY_<ENV> → $XENV_KEY → ~/.config/xenv/projects/<id>/keys/<env>
-  → macOS keychain (xenv/<id>/<env>) → pass (xenv/<id>/<env>)
+passphrase cascade (first hit wins, env-specific beats global per backend):
+  1. $XENV_KEY_<ENV>                              env-specific env var
+  2. $XENV_KEY                                    project-wide env var
+  3. ~/.config/xenv/projects/<id>/keys/<env>.key  env-specific file
+  4. ~/.config/xenv/projects/<id>/keys/_global.key project-wide file
+  5. macOS keychain xenv/<id>/<env>               env-specific keychain
+  6. macOS keychain xenv/<id>/_global             project-wide keychain
+  7. pass xenv/<id>/<env>                         env-specific pass
+  8. pass xenv/<id>/_global                       project-wide pass
+
+default `xenv setup` (no env vars pinned) writes ONE _global.key — all four
+default envs share it. split an env off later with `xenv key rotate @<env>`.
 USAGE
 }
 
@@ -861,23 +896,60 @@ setup_fresh() {
     || die "could not copy $self → $XENV_DIR/bin/xenv"
   chmod +x "$XENV_DIR/bin/xenv"
 
-  # set up each default env: dir + README + passphrase + APP_ENV
+  # Decide the passphrase strategy:
+  #
+  #   - If $XENV_KEY is set: use it as the global key for the project.
+  #     Per-env env-vars ($XENV_KEY_<ENV>), if also set, win for those
+  #     specific envs and get written to per-env files.
+  #
+  #   - If only some $XENV_KEY_<ENV> are set (no $XENV_KEY): those envs
+  #     get per-env files; the remaining envs share a freshly-generated
+  #     global key (written to _global.key).
+  #
+  #   - If nothing is pinned: generate ONE random global key. All four
+  #     envs cascade-resolve via _global.key. This is the new default
+  #     (was: four random per-env keys, in 0.8.0 and prior).
+  #
+  # Rationale: most users want one key to start. They can split a
+  # specific env off later with `xenv key rotate @<env>` (which writes
+  # a new per-env key and re-encrypts that env's values under it).
+
+  # First: determine if we'll write a global key, and what its value is.
+  global_key=""
+  if [ -n "${XENV_KEY:-}" ]; then
+    global_key=$XENV_KEY
+    info "_global: using pinned passphrase from \$XENV_KEY"
+  else
+    # check if ANY env lacks a $XENV_KEY_<ENV> — if so, we'll need a global
+    needs_global=0
+    for env_name in $XENV_DEFAULT_ENVS; do
+      vname=$(env_var_name "$env_name")
+      eval "v=\${$vname:-}"
+      [ -z "$v" ] && needs_global=1
+    done
+    if [ "$needs_global" = "1" ]; then
+      global_key=$(openssl rand -base64 32 | tr -d '\n')
+    fi
+  fi
+
+  # Write the global key first, if we have one.
+  [ -n "$global_key" ] && store_key "_global" "$global_key" file >/dev/null 2>&1
+
+  # Now walk each env: write the env README, store per-env passphrase
+  # if $XENV_KEY_<ENV> is set (overrides global for that env), then
+  # write the starter APP_ENV value.
   for env_name in $XENV_DEFAULT_ENVS; do
     init_env_dir "$env_name"
 
     salt_hex=$(openssl rand -hex "$XENV_SALT_BYTES")
     write_env_readme "$env_name" "$XENV_ITER" "$salt_hex"
 
-    # honor $XENV_KEY_<ENV> or $XENV_KEY if set — lets users pin a
-    # passphrase from the start without overwriting a generated one.
-    pinned=$(lookup_pinned_passphrase "$env_name")
-    if [ -n "$pinned" ]; then
-      key=$pinned
-      info "$env_name: using pinned passphrase from env var"
-    else
-      key=$(openssl rand -base64 32 | tr -d '\n')
+    vname=$(env_var_name "$env_name")
+    eval "per_env_key=\${$vname:-}"
+    if [ -n "$per_env_key" ]; then
+      store_key "$env_name" "$per_env_key" file >/dev/null 2>&1
+      info "$env_name: using pinned passphrase from \$$vname (per-env override)"
     fi
-    store_key "$env_name" "$key" file >/dev/null 2>&1
 
     write_value "$env_name" "APP_ENV" "$env_name" \
       || die "could not write APP_ENV for $env_name"
@@ -999,6 +1071,15 @@ cmd_key_generate() {
   env_name=$1
   backend=${2:-auto}
 
+  if [ "$env_name" = "_global" ]; then
+    # Project-wide key generation. No env dir, no env README, no
+    # APP_ENV starter. Just generate the key and store it.
+    key=$(openssl rand -base64 32 | tr -d '\n')
+    store_key "_global" "$key" "$backend"
+    printf '\nfor CI, set this secret:\n  XENV_KEY=%s\n' "$key" >&2
+    return 0
+  fi
+
   if [ -d "$(env_dir "$env_name")" ]; then
     die "env '$env_name' already exists — use 'xenv key rotate @$env_name' to change keys"
   fi
@@ -1020,13 +1101,45 @@ cmd_key_set() {
   env_name=$1
   backend=${2:-auto}
 
-  dir=$(env_dir "$env_name")
-  [ -d "$dir" ] || die "no env '$env_name' — run 'xenv key generate @$env_name' first"
-
   force=0
   case "$backend" in
     --force) backend=auto; force=1 ;;
   esac
+
+  if [ "$env_name" = "_global" ]; then
+    pp=$(read_passphrase "passphrase for project (_global): ") || die "no passphrase read"
+    [ -n "$pp" ] || die "empty passphrase"
+
+    # For global, verify against every env that has no per-env key
+    # set. If any of those envs has values, MAC-verify under $pp. If
+    # all such envs decrypt successfully (or have no values), cache.
+    # On any MAC failure: refuse unless --force.
+    project_id=$(read_project_id) || die "no project id"
+    any_failed=0
+    any_verified=0
+    for d in "$XENV_DIR"/envs/*/; do
+      [ -d "$d" ] || continue
+      env_for_test=${d%/}; env_for_test=${env_for_test##*/}
+      # skip envs with their own per-env key set anywhere
+      if [ -r "$XENV_PROJECTS_DIR/$project_id/keys/$env_for_test.key" ]; then continue; fi
+      verify_passphrase "$env_for_test" "$pp"
+      case $? in
+        0) any_verified=1 ;;
+        1) any_failed=1; err "_global: passphrase does NOT decrypt @$env_for_test" ;;
+        2) ;;  # no values to verify; that's fine
+      esac
+    done
+
+    if [ "$any_failed" = "1" ] && [ "$force" != "1" ]; then
+      die "_global: passphrase did NOT match one or more envs. Re-run with --force to cache anyway."
+    fi
+    [ "$any_failed" = "1" ] && err "_global: caching despite MAC failures (--force given)"
+    store_key "_global" "$pp" "$backend"
+    return 0
+  fi
+
+  dir=$(env_dir "$env_name")
+  [ -d "$dir" ] || die "no env '$env_name' — run 'xenv key generate @$env_name' first"
 
   pp=$(read_passphrase "passphrase for @$env_name: ") || die "no passphrase read"
   [ -n "$pp" ] || die "empty passphrase"
@@ -1062,13 +1175,40 @@ cmd_key_show() {
   id=$(read_project_id) || die "no project id — no $XENV_DIR/$XENV_README_FILE"
 
   if [ "$reveal" -eq 1 ]; then
-    # actually fetch the passphrase (any backend the resolver finds)
-    pp=$(require_key "$env_name") || exit 1
+    if [ "$env_name" = "_global" ]; then
+      pp=$(lookup_key_global) || die "no _global key in any backend"
+    else
+      pp=$(require_key "$env_name") || exit 1
+    fi
     printf '%s\n' "$pp"
     return 0
   fi
 
-  # describe where it lives
+  # Project-wide show: just look at the _global slots.
+  if [ "$env_name" = "_global" ]; then
+    if [ -n "${XENV_KEY:-}" ]; then
+      printf 'env-var: \$XENV_KEY (set)\n'
+      return 0
+    fi
+    f="$XENV_PROJECTS_DIR/$id/keys/_global.key"
+    if [ -r "$f" ]; then
+      printf 'file: %s\n' "$f"
+      return 0
+    fi
+    if command -v security >/dev/null 2>&1 && \
+       security find-generic-password -s xenv -a "$id/_global" >/dev/null 2>&1; then
+      printf 'keychain: service=xenv, account=%s/_global\n' "$id"
+      return 0
+    fi
+    if command -v pass >/dev/null 2>&1 && \
+       pass show "xenv/$id/_global" >/dev/null 2>&1; then
+      printf 'pass: xenv/%s/_global\n' "$id"
+      return 0
+    fi
+    die "no _global passphrase set in any backend"
+  fi
+
+  # Per-env show: walk the cascade, report which slot answers.
   vname=$(env_var_name "$env_name")
   eval "v=\${$vname:-}"
   if [ -n "$v" ]; then
@@ -1076,26 +1216,60 @@ cmd_key_show() {
     return 0
   fi
   if [ -n "${XENV_KEY:-}" ]; then
-    printf 'env-var: \$XENV_KEY (set, global fallback)\n'
+    printf 'env-var: \$XENV_KEY (via _global fallback)\n'
     return 0
   fi
 
-  f="$XENV_PROJECTS_DIR/$id/keys/$env_name"
-  if [ -r "$f" ]; then
-    printf 'file: %s\n' "$f"
-    return 0
+  for stem_label in "$env_name:env-specific" "_global:via _global fallback"; do
+    stem=${stem_label%%:*}
+    note=${stem_label#*:}
+    f="$XENV_PROJECTS_DIR/$id/keys/$stem.key"
+    if [ -r "$f" ]; then
+      printf 'file: %s (%s)\n' "$f" "$note"
+      return 0
+    fi
+  done
+
+  if command -v security >/dev/null 2>&1; then
+    for stem_label in "$env_name:env-specific" "_global:via _global fallback"; do
+      stem=${stem_label%%:*}
+      note=${stem_label#*:}
+      if security find-generic-password -s xenv -a "$id/$stem" >/dev/null 2>&1; then
+        printf 'keychain: service=xenv, account=%s/%s (%s)\n' "$id" "$stem" "$note"
+        return 0
+      fi
+    done
   fi
-  if command -v security >/dev/null 2>&1 && \
-     security find-generic-password -s xenv -a "$id/$env_name" >/dev/null 2>&1; then
-    printf 'keychain: service=xenv, account=%s/%s\n' "$id" "$env_name"
-    return 0
-  fi
-  if command -v pass >/dev/null 2>&1 && \
-     pass show "xenv/$id/$env_name" >/dev/null 2>&1; then
-    printf 'pass: xenv/%s/%s\n' "$id" "$env_name"
-    return 0
+  if command -v pass >/dev/null 2>&1; then
+    for stem_label in "$env_name:env-specific" "_global:via _global fallback"; do
+      stem=${stem_label%%:*}
+      note=${stem_label#*:}
+      if pass show "xenv/$id/$stem" >/dev/null 2>&1; then
+        printf 'pass: xenv/%s/%s (%s)\n' "$id" "$stem" "$note"
+        return 0
+      fi
+    done
   fi
   die "no passphrase found for @$env_name in any backend"
+}
+
+# Helper for cmd_key_show --reveal on the global key: read the actual
+# _global value from whichever backend has it, without going through
+# the cascade (which would fall back to env-specific files we don't want).
+lookup_key_global() {
+  id=$(read_project_id 2>/dev/null) || return 1
+  [ -n "${XENV_KEY:-}" ] && { printf '%s' "$XENV_KEY"; return 0; }
+  f="$XENV_PROJECTS_DIR/$id/keys/_global.key"
+  [ -r "$f" ] && { cat "$f"; return 0; }
+  if command -v security >/dev/null 2>&1; then
+    val=$(security find-generic-password -s xenv -a "$id/_global" -w 2>/dev/null) || true
+    [ -n "$val" ] && { printf '%s\n' "$val"; return 0; }
+  fi
+  if command -v pass >/dev/null 2>&1; then
+    val=$(pass show "xenv/$id/_global" 2>/dev/null) || true
+    [ -n "$val" ] && { printf '%s\n' "$val"; return 0; }
+  fi
+  return 1
 }
 
 # remove the cached passphrase from local storage. Leaves the vault.
@@ -1104,7 +1278,7 @@ cmd_key_forget() {
   id=$(read_project_id) || die "no project id"
 
   removed=0
-  f="$XENV_PROJECTS_DIR/$id/keys/$env_name"
+  f="$XENV_PROJECTS_DIR/$id/keys/$env_name.key"
   if [ -e "$f" ]; then
     rm -f "$f" && { info "removed file: $f"; removed=1; }
   fi
@@ -1118,11 +1292,47 @@ cmd_key_forget() {
     pass rm -f "xenv/$id/$env_name" >/dev/null 2>&1 \
       && { info "removed pass entry: xenv/$id/$env_name"; removed=1; }
   fi
-  [ $removed -eq 1 ] || info "no cached passphrase found for @$env_name (already forgotten?)"
+
+  if [ "$removed" != "1" ]; then
+    if [ "$env_name" = "_global" ]; then
+      info "no _global passphrase cached (already forgotten?)"
+    else
+      info "no cached passphrase found for @$env_name (already forgotten?)"
+    fi
+    return 0
+  fi
+
+  # Post-removal cascade hint: which envs (if any) are now using the
+  # NEXT level of the cascade?
+  if [ "$env_name" = "_global" ]; then
+    affected=
+    for d in "$XENV_DIR"/envs/*/; do
+      [ -d "$d" ] || continue
+      e=${d%/}; e=${e##*/}
+      if [ ! -r "$XENV_PROJECTS_DIR/$id/keys/$e.key" ]; then
+        affected="$affected $e"
+      fi
+    done
+    if [ -n "$affected" ]; then
+      info "note: envs without their own key will no longer decrypt:$affected"
+    fi
+  else
+    if [ -r "$XENV_PROJECTS_DIR/$id/keys/_global.key" ]; then
+      info "note: @$env_name now resolves via _global.key (cascade fallback)"
+    else
+      info "note: @$env_name has no remaining passphrase in any backend"
+    fi
+  fi
 }
 
 cmd_key_rotate() {
   env_name=$1
+
+  if [ "$env_name" = "_global" ]; then
+    cmd_key_rotate_global
+    return $?
+  fi
+
   dir=$(env_dir "$env_name")
   [ -d "$dir" ] || die "no env '$env_name'"
 
@@ -1170,7 +1380,7 @@ EOF
   # detect which backend the old key lives in, so we update the same one
   id=$(read_project_id) || die "no project id — cannot rotate"
   backend=auto
-  [ -r "$XENV_PROJECTS_DIR/$id/keys/$env_name" ] && backend=file
+  [ -r "$XENV_PROJECTS_DIR/$id/keys/$env_name.key" ] && backend=file
   command -v security >/dev/null 2>&1 && \
     security find-generic-password -s xenv -a "$id/$env_name" >/dev/null 2>&1 && backend=keychain
   command -v pass >/dev/null 2>&1 && \
@@ -1178,6 +1388,99 @@ EOF
 
   store_key "$env_name" "$new_pass" "$backend"
   printf '\nrotated. new key:\n  %s=%s\n' "$(env_var_name "$env_name")" "$new_pass" >&2
+}
+
+# Project-wide rotate. Walks each env that uses the _global key (no
+# per-env override), decrypts ALL of them to tmpfs first (atomicity:
+# every env must be readable before we commit anything), then writes
+# the new global key + new params + re-encrypts. Envs with their own
+# per-env key are untouched (Rule B).
+cmd_key_rotate_global() {
+  id=$(read_project_id) || die "no project id — cannot rotate"
+  old_global=$(lookup_key_global) || die "no _global key set; nothing to rotate"
+
+  # identify envs that resolve via _global (no per-env override)
+  affected=
+  for d in "$XENV_DIR"/envs/*/; do
+    [ -d "$d" ] || continue
+    e=${d%/}; e=${e##*/}
+    # per-env file beats global; per-env keychain/pass too. Check the
+    # cheap-and-common case: per-env .key file. (If a user has set a
+    # per-env key via keychain/pass without a corresponding file, the
+    # global rotate would incorrectly try to re-encrypt that env. For
+    # 0.9.0 we accept that edge case; documented in CHANGELOG.)
+    if [ ! -r "$XENV_PROJECTS_DIR/$id/keys/$e.key" ]; then
+      affected="$affected $e"
+    fi
+  done
+
+  if [ -z "$affected" ]; then
+    info "no envs use _global; nothing to rotate"
+    return 0
+  fi
+
+  info "rotating _global; affects envs:$affected"
+
+  # ── Phase 1: decrypt every affected env's values to a tmpfs stash.
+  # If ANY decrypt fails, abort — vault stays intact.
+  tmp_stash=$(mktemp -d "${TMPDIR:-/tmp}/xenv-rotate-global.XXXXXXXX") || die "mktemp failed"
+  trap 'rm -rf "$tmp_stash"' EXIT INT TERM HUP
+
+  for e in $affected; do
+    dir=$(env_dir "$e")
+    params=$(read_params "$e") || die "$e: could not read params"
+    iter=${params%% *}
+    salt=${params#* }
+    read -r enc mac <<EOF
+$(derive_keys "$old_global" "$salt" "$iter")
+EOF
+    mkdir -p "$tmp_stash/$e"
+    for f in "$dir"/*"$XENV_VALUE_EXT"; do
+      [ -f "$f" ] || continue
+      name=${f##*/}
+      plain=$(decrypt_value "$enc" "$mac" < "$f") \
+        || die "$e: decrypt failed for $name (old _global key wrong?)"
+      printf '%s' "$plain" > "$tmp_stash/$e/$name"
+    done
+  done
+
+  # ── Phase 2: generate new global, new params per env, store stash files.
+  # Only happens after every decrypt above succeeded.
+  new_global=$(openssl rand -base64 32 | tr -d '\n')
+
+  for e in $affected; do
+    dir=$(env_dir "$e")
+    new_salt=$(openssl rand -hex "$XENV_SALT_BYTES")
+    new_iter=$XENV_ITER
+    read -r new_enc new_mac <<EOF
+$(derive_keys "$new_global" "$new_salt" "$new_iter")
+EOF
+    rewrite_frontmatter "$e" "$new_iter" "$new_salt" \
+      || die "could not rewrite frontmatter for $e"
+    for f in "$tmp_stash/$e"/*; do
+      [ -f "$f" ] || continue
+      name=${f##*/}
+      envelope=$(encrypt_value "$new_enc" "$new_mac" < "$f") \
+        || die "$e: re-encryption failed for $name"
+      printf '%s\n' "$envelope" | atomic_write "$dir/$name" \
+        || die "$e: could not write $name"
+    done
+  done
+
+  # ── Phase 3: store the new global. Detect the backend the old one was in.
+  backend=auto
+  [ -r "$XENV_PROJECTS_DIR/$id/keys/_global.key" ] && backend=file
+  command -v security >/dev/null 2>&1 && \
+    security find-generic-password -s xenv -a "$id/_global" >/dev/null 2>&1 && backend=keychain
+  command -v pass >/dev/null 2>&1 && \
+    pass show "xenv/$id/_global" >/dev/null 2>&1 && backend=pass
+  store_key "_global" "$new_global" "$backend"
+
+  rm -rf "$tmp_stash"
+  trap - EXIT INT TERM HUP
+
+  printf '\nrotated _global. new key:\n  XENV_KEY=%s\n' "$new_global" >&2
+  info "rotated envs:$affected"
 }
 
 cmd_set() {
@@ -1370,14 +1673,20 @@ cmd_key() {
   [ -n "$sub" ] || die "key needs a subverb: generate | set | rotate | show | forget"
   shift
 
-  [ -n "$env_name" ] || die "key $sub needs an env: 'xenv key $sub @<env>'"
+  # No @<env> in argv → operate on the project-wide (_global) key.
+  # With @<env> → operate on that env's key.
+  if [ -z "$env_name" ]; then
+    target=_global
+  else
+    target=$env_name
+  fi
 
   case "$sub" in
-    generate) cmd_key_generate "$env_name" "${1:-auto}" ;;
-    set)      cmd_key_set      "$env_name" "${1:-auto}" ;;
-    rotate)   cmd_key_rotate   "$env_name" ;;
-    show)     cmd_key_show     "$env_name" "${1:-}" ;;
-    forget)   cmd_key_forget   "$env_name" ;;
+    generate) cmd_key_generate "$target" "${1:-auto}" ;;
+    set)      cmd_key_set      "$target" "${1:-auto}" ;;
+    rotate)   cmd_key_rotate   "$target" ;;
+    show)     cmd_key_show     "$target" "${1:-}" ;;
+    forget)   cmd_key_forget   "$target" ;;
     *)        die "unknown key subverb: $sub (try: generate | set | rotate | show | forget)" ;;
   esac
 }

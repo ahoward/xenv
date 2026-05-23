@@ -131,13 +131,114 @@ test_init_creates_four_envs() {
   return 0
 }
 
-test_init_stores_passphrase_per_env() {
+test_setup_stores_global_passphrase() {
+  # Default `xenv setup` writes ONE _global.key, not per-env files.
+  # All envs cascade-resolve via _global. Per-env files only appear
+  # when $XENV_KEY_<ENV> was pinned or after `xenv key rotate @<env>`.
   xenv setup >/dev/null 2>&1
   kdir=$(project_keys_dir)
+  [ -f "$kdir/_global.key" ] || return 1
+  # confirm there are no per-env .key files yet (default behavior)
   for env_name in testing development staging production; do
-    [ -f "$kdir/$env_name" ] || return 1
+    [ ! -f "$kdir/$env_name.key" ] || return 1
   done
   return 0
+}
+
+test_setup_honors_global_env_var() {
+  # $XENV_KEY pinned at setup time → that value becomes _global.key.
+  # Subsequent decrypts work both with and without the env var set.
+  pinned='my-shared-passphrase'
+  XENV_KEY=$pinned xenv setup >/dev/null 2>&1
+  kdir=$(project_keys_dir)
+  [ -f "$kdir/_global.key" ] || return 1
+  cached=$(cat "$kdir/_global.key")
+  assert_eq "$pinned" "$cached" "_global.key contents match \$XENV_KEY" || return 1
+  # works without env var (file backend resolves)
+  out=$(xenv get @production APP_ENV)
+  assert_eq "production" "$out" "decrypt via cached _global.key"
+}
+
+test_setup_honors_per_env_var() {
+  # $XENV_KEY_<ENV> pinned at setup → per-env file gets that value.
+  # The OTHER envs still get a generated _global.key.
+  pinned='prod-specific-key'
+  XENV_KEY_PRODUCTION=$pinned xenv setup >/dev/null 2>&1
+  kdir=$(project_keys_dir)
+  [ -f "$kdir/production.key" ] || return 1
+  [ -f "$kdir/_global.key" ]    || return 1
+  assert_eq "$pinned" "$(cat "$kdir/production.key")" \
+    "production.key contents match \$XENV_KEY_PRODUCTION" || return 1
+}
+
+test_cascade_per_env_beats_global() {
+  # Per-env file shadows _global file. After setting both, @prod
+  # resolves to its own key, not _global.
+  xenv setup >/dev/null 2>&1
+  kdir=$(project_keys_dir)
+
+  # set a value (encrypted under _global), then rotate prod (which
+  # writes a new per-env key and re-encrypts under it)
+  xenv set @production SECRET=alpha >/dev/null 2>&1
+  xenv key rotate @production >/dev/null 2>&1
+  [ -f "$kdir/production.key" ] || return 1
+  [ "$(cat "$kdir/production.key")" != "$(cat "$kdir/_global.key")" ] || return 1
+
+  # production decrypts under its new per-env key
+  assert_eq "alpha" "$(xenv get @production SECRET)" "@prod decrypts via per-env key" || return 1
+  # staging still works via _global
+  assert_eq "staging" "$(xenv get @staging APP_ENV)" "@staging decrypts via _global" || return 1
+}
+
+test_key_show_no_env_describes_global() {
+  xenv setup >/dev/null 2>&1
+  out=$(xenv key show)
+  echo "$out" | grep -q '_global.key' || return 1
+}
+
+test_key_show_at_env_says_via_global() {
+  # @env with no per-env key set → show says "via _global fallback"
+  xenv setup >/dev/null 2>&1
+  out=$(xenv key show @production)
+  echo "$out" | grep -q 'via _global fallback' || return 1
+}
+
+test_key_forget_global_warns_about_envs() {
+  # After forgetting _global, envs without a per-env key have nowhere to go.
+  xenv setup >/dev/null 2>&1
+  out=$(xenv key forget 2>&1)
+  echo "$out" | grep -q 'envs without their own key will no longer decrypt' || return 1
+}
+
+test_key_forget_env_notes_cascade_fallback() {
+  # After forgetting a per-env key, the cascade falls back to _global.
+  # The forget message should call it out.
+  xenv setup >/dev/null 2>&1
+  xenv key rotate @production >/dev/null 2>&1
+  out=$(xenv key forget @production 2>&1)
+  echo "$out" | grep -q 'now resolves via _global.key' || return 1
+}
+
+test_key_rotate_global_skips_per_env_keyed() {
+  # Project-wide rotate touches only envs without a per-env key.
+  xenv setup >/dev/null 2>&1
+  xenv set @production SECRET=prod >/dev/null 2>&1
+  xenv set @staging    SECRET=stg  >/dev/null 2>&1
+
+  # split production off
+  xenv key rotate @production >/dev/null 2>&1
+  prod_key_before=$(cat "$(project_keys_dir)/production.key")
+
+  # rotate _global
+  xenv key rotate >/dev/null 2>&1
+  prod_key_after=$(cat "$(project_keys_dir)/production.key")
+
+  # production's key must NOT have changed
+  [ "$prod_key_before" = "$prod_key_after" ] || return 1
+
+  # but values in both envs still decrypt
+  assert_eq "prod" "$(xenv get @production SECRET)" "prod decrypts" || return 1
+  assert_eq "stg"  "$(xenv get @staging    SECRET)" "stg  decrypts via new _global" || return 1
 }
 
 test_init_app_env_decrypts_to_env_name() {
@@ -621,10 +722,13 @@ test_rotate_changes_key_preserves_values() {
   xenv set @production API=api1 >/dev/null 2>&1
   printf 'multi\nline' | xenv set @production PEM >/dev/null 2>&1
 
+  # Before rotate: production has no per-env key (cascades to _global).
+  # After `xenv key rotate @production`: production gets its own key,
+  # which is what the rest of this test asserts changes.
   kdir=$(project_keys_dir)
-  old_key=$(cat "$kdir/production")
+  old_key=$(cat "$kdir/_global.key")
   xenv key rotate @production >/dev/null 2>&1
-  new_key=$(cat "$kdir/production")
+  new_key=$(cat "$kdir/production.key")
 
   [ "$old_key" != "$new_key" ] || return 1
   [ "$(xenv get @production APP_ENV)" = "production" ] || return 1
@@ -637,8 +741,11 @@ test_rotate_changes_key_preserves_values() {
 # ── crypto integrity ──────────────────────────────────────────────
 
 test_wrong_key_fails_mac() {
+  # Tamper with the cached key: write a known-wrong value to
+  # _global.key (which is what all four envs cascade to by default).
+  # Decrypt under that key should fail MAC.
   xenv setup >/dev/null 2>&1
-  echo "wrongkeywrongkeywrongkeywrongkey=" > "$(project_keys_dir)/production"
+  echo "wrongkeywrongkeywrongkeywrongkey=" > "$(project_keys_dir)/_global.key"
   out=$(xenv get @production APP_ENV 2>&1) && return 1
   echo "$out" | grep -qi "MAC verification\|wrong key" || return 1
 }
@@ -882,7 +989,15 @@ run_test "init creates xenv/"                       test_init_creates_xenv_dir
 run_test "init creates top README"                  test_init_creates_top_readme
 run_test "init creates xenv/bin/xenv"               test_init_creates_bin_xenv
 run_test "init creates four envs"                   test_init_creates_four_envs
-run_test "init stores passphrase per env"           test_init_stores_passphrase_per_env
+run_test "setup stores ONE global passphrase"       test_setup_stores_global_passphrase
+run_test "setup honors \$XENV_KEY as _global"        test_setup_honors_global_env_var
+run_test "setup honors \$XENV_KEY_<ENV> as per-env"  test_setup_honors_per_env_var
+run_test "cascade: per-env beats _global"            test_cascade_per_env_beats_global
+run_test "key show (no @env) describes _global"      test_key_show_no_env_describes_global
+run_test "key show @env reports via _global"         test_key_show_at_env_says_via_global
+run_test "key forget _global warns about envs"       test_key_forget_global_warns_about_envs
+run_test "key forget @env notes cascade fallback"    test_key_forget_env_notes_cascade_fallback
+run_test "key rotate (project) skips per-env keyed"  test_key_rotate_global_skips_per_env_keyed
 run_test "init APP_ENV decrypts to env name"        test_init_app_env_decrypts_to_env_name
 run_test "init per-env README mentions env name"    test_init_per_env_readme_mentions_env_name
 run_test "init top README documents passphrase env vars" \

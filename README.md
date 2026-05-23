@@ -75,25 +75,25 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` 3.0+, `awk`, `mkt
 ## COMMANDS
 
 `setup`
-> Bootstrap or adopt. If `./xenv/` doesn't exist: create it with four default envs (testing, development, staging, production), generate per-env passphrases (or honor `$XENV_KEY_<ENV>` if set), write the project id into `xenv/README.md`. If `./xenv/` already exists (e.g. you cloned a teammate's repo): walk each env, prompt for the passphrase (or honor `$XENV_KEY_<ENV>`), decrypt one value to MAC-verify, cache to `~/.config/xenv/projects/<id>/keys/<env>` on success. Non-tty stdin without env vars set: skip with a warning.
+> Bootstrap or adopt. If `./xenv/` doesn't exist: create it with four default envs (testing, development, staging, production), write the project id into `xenv/README.md`, generate ONE random project-wide passphrase (`_global.key`) that all four envs share via the cascade. `$XENV_KEY` is honored as the global if set; `$XENV_KEY_<ENV>` is honored as a per-env override (writes `<env>.key`). If `./xenv/` already exists (e.g. you cloned a teammate's repo): walk each env, prompt for the passphrase (or honor `$XENV_KEY_<ENV>` / `$XENV_KEY`), decrypt one value to MAC-verify, cache to `~/.config/xenv/projects/<id>/keys/<env>.key` on success. Non-tty stdin without env vars set: skip with a warning.
 
 `environments`
 > List envs and which have a known passphrase locally.
 
-`key generate @<env> [--keychain | --pass | --file]`
-> Create a new env directory and generate a fresh random passphrase. The backend flag selects where the passphrase is stored locally.
+`key generate [@<env>] [--keychain | --pass | --file]`
+> With `@<env>`: create a new env directory and generate a fresh random per-env passphrase. With no `@<env>`: generate a random project-wide passphrase (`_global.key`); every env without its own per-env key cascades to this one. Backend flag selects local storage (default: file).
 
-`key set @<env> [--keychain | --pass | --file] [--force]`
-> Read a passphrase from stdin (or tty no-echo prompt). MAC-verify against existing values; refuse to cache on mismatch unless `--force`. Use this to pin a passphrase against an existing vault, or to re-cache a passphrase after `key forget`.
+`key set [@<env>] [--keychain | --pass | --file] [--force]`
+> Read a passphrase from stdin (or tty no-echo prompt). With `@<env>`: MAC-verify against that env's existing values; refuse to cache on mismatch unless `--force`. With no `@<env>`: MAC-verify against every env that currently cascades to the global; refuse if any fail. Use this to pin a passphrase against an existing vault, or to re-cache after `key forget`.
 
-`key rotate @<env>`
-> Generate a new passphrase, re-encrypt every value in the env. All-or-nothing: every value is decrypted to a tmpfs stash first; new params and re-encryption only commit if every decrypt succeeded.
+`key rotate [@<env>]`
+> With `@<env>`: generate a new per-env passphrase, re-encrypt every value in that env, write `<env>.key` (this splits the env off from the global cascade). With no `@<env>`: rotate the project-wide `_global.key`; re-encrypts every env that was using the global (envs with their own per-env key are untouched). All-or-nothing: every decrypt happens to a tmpfs stash first; commit only if every decrypt succeeded.
 
-`key show @<env> [--reveal]`
-> Default: print where the passphrase lives (file path, keychain entry, or `pass` entry). With `--reveal`, print the actual passphrase to stdout. Loud foot-gun — only with the explicit flag.
+`key show [@<env>] [--reveal]`
+> Default: print where the passphrase lives (file path, keychain entry, or `pass` entry). With `@<env>`: walks the full cascade and notes which slot answered (e.g. "file: …/_global.key (via _global fallback)"). With `--reveal`: print the actual passphrase to stdout. Loud foot-gun — only with the explicit flag.
 
-`key forget @<env>`
-> Remove the cached passphrase from local storage (file/keychain/pass). Leaves the encrypted vault intact. Use for "I want to test the secret-manager path on my dev machine" or "deprovision this laptop."
+`key forget [@<env>]`
+> Remove the cached passphrase from local storage (file/keychain/pass). With `@<env>`: notes if the env now cascades to `_global.key` or has no passphrase at all. With no `@<env>`: lists which envs lose their key as a result. Leaves the encrypted vault intact.
 
 `set @<env> KEY=value`
 > Store an encrypted value. With no `=`, reads the value from stdin (multi-line / binary OK). Stdin form strips one trailing newline (`value=$(cat)`); pipe in two if a literal trailing newline is needed.
@@ -150,8 +150,11 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` 3.0+, `awk`, `mkt
 `xenv/envs/<env>/<KEY>.value.enc`
 > One encrypted value per file. Format: `xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>`.
 
-`~/.config/xenv/projects/<id>/keys/<env>`
-> Mode-600 passphrase, file backend. Never in the repo.
+`~/.config/xenv/projects/<id>/keys/<env>.key`
+> Mode-600 per-env passphrase, file backend. Never in the repo. Wins over `_global.key` for this env.
+
+`~/.config/xenv/projects/<id>/keys/_global.key`
+> Mode-600 project-wide passphrase, file backend. Used by any env without its own `<env>.key`. The default `xenv setup` writes this alone (one file, one key, project-wide).
 
 `~/.config/xenv/projects/<id>/origin`
 > Absolute path of `xenv/` at the time of `setup`. Informational.
@@ -199,6 +202,27 @@ Pin a passphrase against an existing vault:
 ```sh
 xenv key set @production           # prompts with no-echo
 echo "$SECRET" | xenv key set @production    # from stdin
+echo "$SECRET" | xenv key set                # no @env: pins the project-wide _global
+```
+
+Start with one shared key, later split production off into its own:
+
+```sh
+# day 1: one key, all envs share it (this is the default)
+xenv setup
+xenv set @production API_KEY=sk-...
+xenv set @staging    API_KEY=sk-...   # same key encrypts both
+
+# day 90: production needs its own key now (real customers, real data)
+xenv key rotate @production            # writes production.key, re-encrypts prod
+                                       # staging/dev/testing still cascade to _global
+```
+
+Rotate just the shared key (touches only envs without a per-env key):
+
+```sh
+xenv key rotate                        # re-encrypts envs using _global,
+                                       # leaves per-env-keyed envs alone
 ```
 
 Peek at the loaded env (no CMD — just prints KEY=value lines):
@@ -246,13 +270,18 @@ The frontmatter parser is 20 lines of awk: split each line on the first `:`, tri
 
 Per-env passphrase backends are scoped by project id, so an env named `production` in project A and `production` in project B never share a key. Heterogeneous setups are fine: A in keychain, B in pass, C in file.
 
-Passphrase resolution, first hit wins:
+Passphrase cascade (first hit wins; env-specific beats `_global` *within* each backend class, then backends are ordered env-vars → file → keychain → pass):
 
-1. `$XENV_KEY_<ENV>`
-2. `$XENV_KEY`
-3. `~/.config/xenv/projects/<id>/keys/<env>` (mode 600)
-4. macOS keychain — service `xenv`, account `<id>/<env>`
-5. `pass show xenv/<id>/<env>`
+1. `$XENV_KEY_<ENV>` (env-specific env var)
+2. `$XENV_KEY` (project-wide env var)
+3. `~/.config/xenv/projects/<id>/keys/<env>.key` (env-specific file, mode 600)
+4. `~/.config/xenv/projects/<id>/keys/_global.key` (project-wide file)
+5. macOS keychain — `xenv` / `<id>/<env>` (env-specific)
+6. macOS keychain — `xenv` / `<id>/_global` (project-wide)
+7. `pass show xenv/<id>/<env>` (env-specific)
+8. `pass show xenv/<id>/_global` (project-wide)
+
+The default `xenv setup` (with no env vars pinned) writes a single random `_global.key`; every env cascades to it. `xenv key rotate @<env>` writes a fresh `<env>.key` and re-encrypts that env, splitting it off from the global. Each env has its own `salt`/`iter` in its README frontmatter, so even when envs share a passphrase, their *derived* keys differ — leaking one env's derived key doesn't unlock the others.
 
 ## SECURITY
 

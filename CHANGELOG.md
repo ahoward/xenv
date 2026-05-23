@@ -7,6 +7,85 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.9.0-posix] — 2026-05-23
+
+**Breaking storage change.** Passphrase files now have a `.key` extension
+and the resolver cascades from per-env to project-wide. Wire format
+(envelopes, frontmatter) is unchanged; recipes are unaffected.
+
+### Added
+
+- **Project-wide `_global.key`.** Sits alongside per-env files at
+  `~/.config/xenv/projects/<id>/keys/_global.key`. Any env without
+  its own `<env>.key` cascades to it.
+
+- **Cascade resolver** with 8 slots, env-specific beats global within
+  each backend class:
+
+      1. $XENV_KEY_<ENV>                env-specific env var
+      2. $XENV_KEY                      project-wide env var
+      3. keys/<env>.key                 env-specific file
+      4. keys/_global.key               project-wide file
+      5. keychain xenv/<id>/<env>       env-specific keychain
+      6. keychain xenv/<id>/_global     project-wide keychain
+      7. pass     xenv/<id>/<env>       env-specific pass
+      8. pass     xenv/<id>/_global     project-wide pass
+
+- **`xenv key <verb>` (no @env) operates on the project-wide key.**
+  `generate`, `set`, `show`, `forget`, `rotate` all parallel the
+  existing env-specific forms. Symmetric verb surface.
+
+- **`xenv key rotate` (project-wide)** rotates `_global.key` and
+  re-encrypts only envs that were using the global (Rule B: envs
+  with their own per-env key are untouched). All-or-nothing: every
+  env's values decrypt to a tmpfs stash before any commit.
+
+- **`xenv key show @<env>` reports which cascade slot answered.**
+  E.g. `file: …/_global.key (via _global fallback)` vs
+  `file: …/production.key (env-specific)`. Lets you debug "why is
+  this env getting this key?" in one command.
+
+- **`xenv key forget` cascade hints.** Forgetting `_global` lists
+  envs that lose their key as a result. Forgetting an env-specific
+  key notes whether the env now cascades to `_global` or has no
+  passphrase left at all.
+
+### Changed
+
+- **`xenv setup` default changed: ONE random global key by default.**
+  Previously: four random per-env keys (one per default env).
+  Now: one random `_global.key`, all four envs cascade to it.
+  Rationale: matches the dominant-path use case (start with one key,
+  split a specific env off later when it needs isolation). To get
+  the old behavior, pin a `$XENV_KEY_<ENV>` per env at setup time.
+
+- **Passphrase files now have a `.key` extension.** Old path was
+  `~/.config/xenv/projects/<id>/keys/<env>` (no extension). New
+  path is `keys/<env>.key`. Existing users must rename:
+
+      cd ~/.config/xenv/projects/<id>/keys
+      for f in *; do [ -f "$f" ] && [ "${f%.key}" = "$f" ] && mv "$f" "$f.key"; done
+
+  No automatic migration. The audience is small enough that a
+  manual one-liner is cleaner than a compat shim.
+
+- **`xenv key rotate @<env>` semantics extended.** Still works the
+  same when production already has its own key (rotate the per-env
+  key, re-encrypt). When production was cascading to `_global`,
+  `rotate @production` now writes a NEW `production.key`, splitting
+  production off from the global. The rest of the project keeps
+  using the global. This makes "I want to give production its own
+  key now" a single command.
+
+### Known limitation
+
+- The project-wide `xenv key rotate` identifies "envs using
+  `_global`" by checking only for the file backend's `<env>.key`.
+  An env whose per-env key lives only in keychain or `pass` (without
+  a corresponding file) would incorrectly be treated as
+  global-using. For 0.9.0, document the limit; fix in a future
+  release.
+
 ## [0.8.0-posix] — 2026-05-22
 
 **Breaking release.** The verb surface is rewritten. No aliases, no
