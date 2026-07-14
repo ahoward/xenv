@@ -77,6 +77,30 @@ require "json"
 env = JSON.parse(`xenv @production --json`)
 ```
 
+```java
+var p = new ProcessBuilder("xenv", "@production", "--json").start();
+var json = new String(p.getInputStream().readAllBytes());   // hand to Jackson/Gson
+```
+
+```csharp
+var psi = new ProcessStartInfo("xenv", "@production --json") { RedirectStandardOutput = true };
+var env = JsonSerializer.Deserialize<Dictionary<string,string>>(Process.Start(psi).StandardOutput.ReadToEnd());
+```
+
+```elixir
+{out, 0} = System.cmd("xenv", ["@production", "--json"])
+env = Jason.decode!(out)
+```
+
+```php
+$env = json_decode(shell_exec('xenv @production --json'), true);
+```
+
+```sh
+# shell + jq — no language at all
+db=$(xenv @production --json | jq -r .DATABASE_URL)
+```
+
 `--json` emits one JSON object `{"KEY":"value",...}`; every value is
 byte-exact, control characters use JSON escapes (`\n`, `\t`, `\u00XX`),
 and an empty env is `{}`. Any stdlib JSON parser loads it — no envelope
@@ -266,6 +290,7 @@ The recipes checked in here were generated from earlier versions of this README.
 
 - [`pythong/xenv.py`](pythong/xenv.py) — stdlib `hashlib` + `hmac`; shells out to `openssl(1)` for AES (Python's stdlib has no AES)
 - [`node/xenv.js`](node/xenv.js) — pure stdlib `crypto`, zero deps
+- [`ruby/xenv.rb`](ruby/xenv.rb) — pure stdlib `openssl`, zero gems
 - [`go/xenv/xenv.go`](go/xenv/xenv.go) + [`go/main/main.go`](go/main/main.go) — stdlib + `golang.org/x/crypto/pbkdf2`
 - [`rust/src/lib.rs`](rust/src/lib.rs) — RustCrypto crates: `aes`, `cbc`, `hmac`, `sha2`, `pbkdf2`
 - [`gemini/`](gemini/) — proof recipe: built by Google's Gemini model against this README (see `gemini/README.md` for the experiment notes)

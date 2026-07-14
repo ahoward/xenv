@@ -118,6 +118,13 @@ else
   SKIP=$((SKIP + 1))
 fi
 
+if command -v ruby >/dev/null 2>&1; then
+  exercise "ruby" ruby "$HERE/ruby/xenv.rb"
+else
+  yellow "skip: ruby not found"
+  SKIP=$((SKIP + 1))
+fi
+
 if command -v go >/dev/null 2>&1; then
   ( cd "$HERE/go" && go mod tidy >/dev/null 2>&1 ) || true
   exercise "go" sh -c 'cd "$0" && go run ./main "$@"' "$HERE/go"

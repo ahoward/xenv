@@ -25,7 +25,7 @@ jobs:
 
   recipes:
     runs-on: ubuntu-latest
-    name: recipe round-trip tests (python, node, go, rust, php)
+    name: recipe round-trip tests (python, node, ruby, go, rust, php)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -19,6 +19,12 @@ else
   echo "  node:    skipped — node not found"
 fi
 
+if command -v ruby >/dev/null 2>&1; then
+  echo "  ruby:    no build step (interpreted, stdlib openssl)"
+else
+  echo "  ruby:    skipped — ruby not found"
+fi
+
 if command -v go >/dev/null 2>&1; then
   echo "  go:      prefetching x/crypto"
   ( cd "$HERE/go" && go mod tidy >/dev/null 2>&1 ) || true
