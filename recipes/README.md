@@ -45,6 +45,55 @@ Demo vault contents (already encrypted in `recipes/xenv/envs/production/`):
 | `GREETING`     | `hi from xenv recipes`          |
 | `APP_ENV`      | `production`                    |
 
+## do you even need a recipe? — `xenv @<env> --json`
+
+If the `xenv` shell tool is present wherever your code runs, you may not
+need a recipe at all. Shell out to it and parse the JSON:
+
+```sh
+xenv @production --json
+# → {"HELLO":"world","DATABASE_URL":"postgres://localhost/demo",...}
+```
+
+```python
+import json, subprocess
+env = json.loads(subprocess.run(
+    ["xenv", "@production", "--json"], capture_output=True, text=True, check=True
+).stdout)
+```
+
+```javascript
+const env = JSON.parse(require("child_process").execSync("xenv @production --json"));
+```
+
+```go
+out, _ := exec.Command("xenv", "@production", "--json").Output()
+var env map[string]string
+json.Unmarshal(out, &env)
+```
+
+```ruby
+require "json"
+env = JSON.parse(`xenv @production --json`)
+```
+
+`--json` emits one JSON object `{"KEY":"value",...}`; every value is
+byte-exact, control characters use JSON escapes (`\n`, `\t`, `\u00XX`),
+and an empty env is `{}`. Any stdlib JSON parser loads it — no envelope
+parsing, no crypto dependency, no per-language port.
+
+**When to use which:**
+
+| | needs `xenv` installed | needs a crypto lib | best for |
+|---|---|---|---|
+| `xenv @<env> --json` | yes | no | dev boxes, CI, containers that ship the tool |
+| a recipe (below) | no | yes | production apps that carry only the passphrase + your code |
+
+A recipe is the zero-lock-in path: it reads the on-disk envelopes
+directly, so your app needs only the passphrase (via env var) and a
+crypto library — not the `xenv` binary. `--json` is the shortcut for
+when the tool is already there.
+
 ## what xenv is, in one paragraph
 
 xenv stores encrypted environment variables in a project's repo. One file per variable. Each file contains a single line of the form `xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>`. The per-env KDF parameters (`version`, `iter`, `salt`) live in YAML frontmatter at the top of a sibling `README.md`. The passphrase that pairs with those params lives **outside the repo** — for a deployed app, in an environment variable like `$XENV_KEY_PRODUCTION`.
