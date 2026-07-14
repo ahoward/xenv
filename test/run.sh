@@ -665,6 +665,82 @@ test_at_no_command_multiline_values_intact() {
   echo "$out" | grep -qx 'line3'        || return 1
 }
 
+test_json_dump_is_one_object() {
+  # `xenv @env --json` prints one JSON object {"KEY":"value",...} on a
+  # single line. Language-neutral: any stdlib JSON parser can load it.
+  xenv setup >/dev/null 2>&1
+  xenv set @production HELLO=world >/dev/null 2>&1
+  xenv set @production NUMBER=42 >/dev/null 2>&1
+
+  out=$(xenv @production --json) || return 1
+  # exactly one line
+  [ "$(printf '%s\n' "$out" | wc -l)" -eq 1 ] || return 1
+  # starts with { and ends with }
+  case "$out" in
+    '{'*'}') ;;
+    *) return 1 ;;
+  esac
+  # the pairs are present (APP_ENV is the starter value)
+  case "$out" in
+    *'"APP_ENV":"production"'*) ;; *) return 1 ;;
+  esac
+  case "$out" in
+    *'"HELLO":"world"'*) ;; *) return 1 ;;
+  esac
+  case "$out" in
+    *'"NUMBER":"42"'*) ;; *) return 1 ;;
+  esac
+}
+
+test_json_dump_position_independent() {
+  # --json is a verb; @env may sit before or after it.
+  xenv setup >/dev/null 2>&1
+  a=$(xenv @development --json) || return 1
+  b=$(xenv --json @development) || return 1
+  assert_eq "$a" "$b" "--json is position-independent w.r.t. @env"
+}
+
+test_json_dump_escapes_special_chars() {
+  # Values with '=', quotes, backslashes, tabs, and newlines must survive
+  # as valid, correctly-escaped JSON. This is the whole point of --json:
+  # KEY=value lines can't represent these unambiguously.
+  xenv setup >/dev/null 2>&1
+  xenv set @production 'WITHEQ=a=b=c'          >/dev/null 2>&1
+  xenv set @production 'QUOTED=he said "hi"'   >/dev/null 2>&1
+  printf 'l1\nl2\ttab' | xenv set @production MULTI >/dev/null 2>&1
+
+  out=$(xenv @production --json) || return 1
+  # '=' survives verbatim inside the JSON string
+  case "$out" in *'"WITHEQ":"a=b=c"'*) ;; *) return 1 ;; esac
+  # embedded double-quotes are backslash-escaped
+  case "$out" in *'"QUOTED":"he said \"hi\""'*) ;; *) return 1 ;; esac
+  # newline and tab become \n and \t (no raw control bytes)
+  case "$out" in *'"MULTI":"l1\nl2\ttab"'*) ;; *) return 1 ;; esac
+}
+
+test_json_dump_empty_env_is_braces() {
+  # An env with no values dumps as "{}".
+  xenv setup >/dev/null 2>&1
+  xenv key generate @blank --file >/dev/null 2>&1
+  out=$(xenv @blank --json) || return 1
+  assert_eq "{}" "$out" "empty env dumps as {}"
+}
+
+test_json_dump_needs_env() {
+  # --json with no @env is an error.
+  xenv setup >/dev/null 2>&1
+  out=$(xenv --json 2>&1) && return 1
+  echo "$out" | grep -qi "needs an env" || return 1
+}
+
+test_json_flag_not_eaten_by_run() {
+  # When @env has a CMD, a trailing --json is an argument to that CMD,
+  # not xenv's dump flag.
+  xenv setup >/dev/null 2>&1
+  out=$(xenv @development sh -c 'printf %s "$1"' -- --json 2>&1) || return 1
+  assert_eq "--json" "$out" "--json passes through to the run command"
+}
+
 test_dash_dash_form_retired() {
   # `xenv -- env CMD` was the old shorthand. It's gone — @env replaces it.
   # The dispatcher should reject `--` as an unknown command.
@@ -1048,6 +1124,12 @@ run_test "@env shorthand propagates exit code"      test_at_shorthand_propagates
 run_test "@ with no env fails"                      test_at_empty_env_fails
 run_test "@env with no CMD prints env"              test_at_no_command_prints_env
 run_test "@env with no CMD preserves multi-line"    test_at_no_command_multiline_values_intact
+run_test "@env --json prints one JSON object"       test_json_dump_is_one_object
+run_test "@env --json is position-independent"      test_json_dump_position_independent
+run_test "@env --json escapes special chars"        test_json_dump_escapes_special_chars
+run_test "@env --json empty env is {}"              test_json_dump_empty_env_is_braces
+run_test "@env --json needs an env"                 test_json_dump_needs_env
+run_test "--json not eaten by run command"          test_json_flag_not_eaten_by_run
 run_test "old `--` shorthand is retired"            test_dash_dash_form_retired
 
 # edit

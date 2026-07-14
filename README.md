@@ -52,6 +52,7 @@ xenv edit   @<env> KEY
 xenv run    @<env> CMD [args]
 xenv @<env>      CMD [args]            # shorthand for run
 xenv @<env>                            # no CMD: print KEY=value lines
+xenv @<env> --json                     # print the env as one JSON object
 
 xenv help | version
 ```
@@ -112,6 +113,17 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` 3.0+, `awk`, `mkt
 
 `run @<env> CMD [args]`
 > Decrypt every value in the env, export each as a shell variable, then `exec` CMD with the env injected. PBKDF2 runs once per call, not once per key. `xenv @<env> CMD [args]` is the screaming-loud shorthand: `xenv @production ./deploy`. With **no** CMD, `xenv @<env>` decrypts everything and prints `KEY=value` lines to stdout — same shape as `env(1)` — letting you peek at the loaded env without exec'ing anything.
+
+`@<env> --json`
+> Decrypt the whole env and print it as one JSON object `{"KEY":"value",...}` on a single line. Unlike `KEY=value` lines, JSON is unambiguous for values containing `=`, quotes, newlines, or leading/trailing whitespace — so any language loads an env with its stdlib parser and no custom splitting:
+>
+> ```sh
+> python3 -c 'import json,subprocess; env=json.loads(subprocess.run(["xenv","@production","--json"],capture_output=True,text=True).stdout); print(env["DATABASE_URL"])'
+> node   -e 'const env=JSON.parse(require("child_process").execSync("xenv @production --json")); console.log(env.DATABASE_URL)'
+> ruby   -rjson -e 'env=JSON.parse(`xenv @production --json`); puts env["DATABASE_URL"]'
+> ```
+>
+> An empty env dumps as `{}`. `--json` is a verb, so `@<env>` may sit before or after it. Values are byte-exact; control characters use JSON escapes (`\n`, `\t`, `\u00XX`).
 
 `help`, `version`
 > What they say.
@@ -232,6 +244,13 @@ xenv @production
 # → APP_ENV=production
 # → API_KEY=sk-abc
 # → DATABASE_URL=postgres://localhost
+```
+
+Dump the env as JSON for any language to load (no custom parsing):
+
+```sh
+xenv @production --json
+# → {"APP_ENV":"production","API_KEY":"sk-abc","DATABASE_URL":"postgres://localhost"}
 ```
 
 Pipe binary or multi-line values in from a file:

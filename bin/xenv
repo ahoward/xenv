@@ -40,7 +40,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.9.0-posix"
+XENV_VERSION="0.10.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
@@ -85,6 +85,35 @@ hex_decode() {
       }
     }
   '
+}
+
+# stdin: arbitrary bytes  →  stdout: a JSON string literal (with the
+# surrounding double-quotes) encoding those exact bytes.
+#
+# We go byte-by-byte via `od` (POSIX, handles newlines/NULs/binary that
+# awk's record model would mangle). Control bytes (< 0x20) become the
+# JSON short escapes or \u00XX; " and \ are escaped; every other byte —
+# including high bytes 0x80-0xFF — passes through verbatim, so valid
+# UTF-8 in equals valid UTF-8 out. Empty input yields "".
+json_string() {
+  printf '"'
+  od -An -vtu1 | awk '
+    {
+      for (i = 1; i <= NF; i++) {
+        b = $i
+        if      (b == 34) printf "\\\""
+        else if (b == 92) printf "\\\\"
+        else if (b ==  8) printf "\\b"
+        else if (b ==  9) printf "\\t"
+        else if (b == 10) printf "\\n"
+        else if (b == 12) printf "\\f"
+        else if (b == 13) printf "\\r"
+        else if (b <  32) printf "\\u%04x", b
+        else              printf "%c", b
+      }
+    }
+  '
+  printf '"'
 }
 
 # ── project id ────────────────────────────────────────────────────
@@ -796,6 +825,9 @@ usage:
   xenv run    @<env> CMD [args]      run command with all keys exported
   xenv @<env>      CMD [args]        shorthand for run
   xenv @<env>                        no CMD: print KEY=value lines
+  xenv @<env> --json                 print the env as one JSON object
+                                     (language-neutral; load with any
+                                     stdlib JSON parser)
 
 each env is a directory: xenv/envs/<env>/
 each variable is one file: xenv/envs/<env>/KEY.value.enc
@@ -1652,6 +1684,52 @@ EOF
   done
 }
 
+# cmd_envdump_json <env> — decrypt every value in <env> and print ONE
+# JSON object {"KEY":"value",...} to stdout. This is the language-neutral
+# form of `xenv @<env>`: unlike KEY=value lines, JSON has no ambiguity
+# for values containing '=', newlines, quotes, or leading/trailing
+# whitespace, so any language can load an env with its stdlib parser:
+#
+#   python:  env = json.load(subprocess.run(['xenv','@prod','--json'], ...).stdout)
+#   node:    const env = JSON.parse(execSync('xenv @prod --json'))
+#   ruby:    env = JSON.parse(`xenv @prod --json`)
+#
+# Empty env → "{}". Keys are emitted in the shell glob order (sorted).
+# Each value is decrypted to a tmpfile first, then byte-exact escaped via
+# json_string (command substitution can't strip anything: the escaped
+# form has no raw trailing newline to lose).
+cmd_envdump_json() {
+  [ $# -ge 1 ] || die "envdump needs <env>"
+  env_name=$1
+
+  dir=$(env_dir "$env_name")
+  [ -d "$dir" ] || die "no env '$env_name'"
+
+  read -r enc_key mac_key <<EOF
+$(keys_for_env "$env_name")
+EOF
+  [ -n "$enc_key" ] || exit 1
+
+  umask 077
+  tmp=$(mktemp "${TMPDIR:-/tmp}/xenv-json.XXXXXXXX") || die "mktemp failed"
+  trap 'rm -f "$tmp"' EXIT INT TERM HUP
+
+  printf '{'
+  first=1
+  for f in "$dir"/*"$XENV_VALUE_EXT"; do
+    [ -f "$f" ] || continue
+    name=${f##*/}; name=${name%"$XENV_VALUE_EXT"}
+    decrypt_value "$enc_key" "$mac_key" < "$f" > "$tmp" || die "decrypt failed for $name"
+    [ "$first" -eq 1 ] || printf ','
+    first=0
+    printf '%s:%s' "$(printf '%s' "$name" | json_string)" "$(json_string < "$tmp")"
+  done
+  printf '}\n'
+
+  rm -f "$tmp"
+  trap - EXIT INT TERM HUP
+}
+
 # ── dispatch ──────────────────────────────────────────────────────
 #
 # argv contract: an `@<env>` token may appear anywhere in argv. The
@@ -1768,6 +1846,10 @@ main() {
       [ -n "$env_name" ] || die "run needs an env: 'xenv run @<env> CMD [args]'"
       [ $# -ge 1 ] || die "run needs a command"
       cmd_run "$env_name" "$@"
+      ;;
+    --json)
+      [ -n "$env_name" ] || die "--json needs an env: 'xenv @<env> --json'"
+      cmd_envdump_json "$env_name"
       ;;
 
     *)

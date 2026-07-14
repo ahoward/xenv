@@ -7,6 +7,20 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.10.0-posix] — 2026-07-14
+
+### Added
+
+- **`xenv @<env> --json`.** Dumps the whole env as one JSON object
+  `{"KEY":"value",...}` on a single line. Language-neutral: any stdlib
+  JSON parser loads it, with no custom parsing of `KEY=value` lines —
+  which are ambiguous for values containing `=`, quotes, newlines, or
+  leading/trailing whitespace. Values are byte-exact; control characters
+  use JSON escapes (`\n`, `\t`, `\u00XX`), high bytes pass through so
+  valid UTF-8 round-trips. Empty env dumps as `{}`. `--json` is a verb,
+  so `@<env>` may appear before or after it, and a `--json` argument to
+  a `run` command is not intercepted.
+
 ## [0.9.0-posix] — 2026-05-23
 
 **Breaking storage change.** Passphrase files now have a `.key` extension
