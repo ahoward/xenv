@@ -54,6 +54,26 @@ else
   yellow "skip: ruby"
 fi
 
+if command -v elixir >/dev/null 2>&1; then
+  run_recipe "elixir" elixir "$HERE/elixir/xenv.exs"
+else
+  yellow "skip: elixir"
+fi
+
+if command -v java >/dev/null 2>&1; then
+  run_recipe "java" java "$HERE/java/Xenv.java"
+else
+  yellow "skip: java"
+fi
+
+if [ -x "$HERE/csharp/bin/Release/net8.0/xenv-recipe" ]; then
+  run_recipe "csharp" "$HERE/csharp/bin/Release/net8.0/xenv-recipe"
+elif command -v dotnet >/dev/null 2>&1; then
+  yellow "csharp: binary not built — run recipes/build first"
+else
+  yellow "skip: dotnet"
+fi
+
 if command -v go >/dev/null 2>&1; then
   ( cd "$HERE/go" && go mod tidy >/dev/null 2>&1 ) || true
   run_recipe "go" sh -c 'cd "$0" && go run ./main "$@"' "$HERE/go"

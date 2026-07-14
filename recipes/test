@@ -125,6 +125,31 @@ else
   SKIP=$((SKIP + 1))
 fi
 
+if command -v elixir >/dev/null 2>&1; then
+  exercise "elixir" elixir "$HERE/elixir/xenv.exs"
+else
+  yellow "skip: elixir not found"
+  SKIP=$((SKIP + 1))
+fi
+
+if command -v java >/dev/null 2>&1; then
+  exercise "java" java "$HERE/java/Xenv.java"
+else
+  yellow "skip: java not found"
+  SKIP=$((SKIP + 1))
+fi
+
+CSHARP_BIN="$HERE/csharp/bin/Release/net8.0/xenv-recipe"
+if [ -x "$CSHARP_BIN" ]; then
+  exercise "csharp" "$CSHARP_BIN"
+elif command -v dotnet >/dev/null 2>&1; then
+  ( cd "$HERE/csharp" && dotnet build -c Release --nologo -v quiet >/dev/null )
+  exercise "csharp" "$CSHARP_BIN"
+else
+  yellow "skip: dotnet not found"
+  SKIP=$((SKIP + 1))
+fi
+
 if command -v go >/dev/null 2>&1; then
   ( cd "$HERE/go" && go mod tidy >/dev/null 2>&1 ) || true
   exercise "go" sh -c 'cd "$0" && go run ./main "$@"' "$HERE/go"

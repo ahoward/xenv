@@ -293,6 +293,9 @@ The recipes checked in here were generated from earlier versions of this README.
 - [`ruby/xenv.rb`](ruby/xenv.rb) — pure stdlib `openssl`, zero gems
 - [`go/xenv/xenv.go`](go/xenv/xenv.go) + [`go/main/main.go`](go/main/main.go) — stdlib + `golang.org/x/crypto/pbkdf2`
 - [`rust/src/lib.rs`](rust/src/lib.rs) — RustCrypto crates: `aes`, `cbc`, `hmac`, `sha2`, `pbkdf2`
+- [`elixir/xenv.exs`](elixir/xenv.exs) — pure OTP `:crypto`, zero deps (manual PKCS#7 over raw CBC)
+- [`java/Xenv.java`](java/Xenv.java) — JDK `javax.crypto`, no jars; single-file source launch, hand-rolled PBKDF2 over `Mac`
+- [`csharp/Program.cs`](csharp/Program.cs) — BCL `System.Security.Cryptography`, no NuGet
 - [`gemini/`](gemini/) — proof recipe: built by Google's Gemini model against this README (see `gemini/README.md` for the experiment notes)
 
 ## the canonical implementation

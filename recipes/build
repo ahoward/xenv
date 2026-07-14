@@ -25,6 +25,26 @@ else
   echo "  ruby:    skipped — ruby not found"
 fi
 
+if command -v elixir >/dev/null 2>&1; then
+  echo "  elixir:  no build step (script, OTP :crypto)"
+else
+  echo "  elixir:  skipped — elixir not found"
+fi
+
+if command -v java >/dev/null 2>&1; then
+  echo "  java:    no build step (single-file source launch, JDK stdlib)"
+else
+  echo "  java:    skipped — java not found"
+fi
+
+if command -v dotnet >/dev/null 2>&1; then
+  echo "  csharp:  dotnet build -c Release"
+  ( cd "$HERE/csharp" && dotnet build -c Release --nologo -v quiet >/dev/null )
+  echo "  csharp:  ok ($HERE/csharp/bin/Release/net8.0/xenv-recipe)"
+else
+  echo "  csharp:  skipped — dotnet not found"
+fi
+
 if command -v go >/dev/null 2>&1; then
   echo "  go:      prefetching x/crypto"
   ( cd "$HERE/go" && go mod tidy >/dev/null 2>&1 ) || true
