@@ -58,14 +58,29 @@ Zero lock-in. Git- and agent-friendly.
 
 ## usage
 
-    xenv init                                # bootstrap xenv/ in this project
-    xenv set    production KEY=value         # store an encrypted value
-    xenv set    production KEY < file        # multi-line / binary value
-    xenv get    production KEY               # decrypt (silent on success)
-    xenv list   production                   # list key names (no passphrase needed)
-    xenv run    production ./server          # exec a command with env injected
-    xenv rotate production                   # rotate passphrase, re-encrypt all
-    xenv edit   production KEY               # decrypt → $EDITOR → re-encrypt
+    xenv setup                               # bootstrap xenv/ in this project
+    xenv set    @production KEY=value        # store an encrypted value
+    xenv set    @production KEY < file       # multi-line / binary value
+    xenv get    @production KEY              # decrypt (silent on success)
+    xenv list   @production                  # list key names (no passphrase needed)
+    xenv run    @production ./server         # exec a command with env injected
+    xenv @production ./server                # shorthand for run
+    xenv @production                         # no CMD: print KEY=value lines
+    xenv @production --json                  # print the env as one JSON object
+    xenv edit   @production KEY              # decrypt → $EDITOR → re-encrypt
+    xenv key rotate @production              # rotate passphrase, re-encrypt all
+
+The `@<env>` token may appear anywhere in argv.
+
+## load an env from any language
+
+`xenv @<env> --json` prints one JSON object {"KEY":"value",...}. Unlike
+KEY=value lines it is unambiguous for values with '=', quotes, newlines,
+or whitespace — so any language loads an env with its stdlib parser:
+
+    python3 -c 'import json,subprocess; env=json.loads(subprocess.run(["xenv","@production","--json"],capture_output=True,text=True).stdout)'
+    node   -e 'const env=JSON.parse(require("child_process").execSync("xenv @production --json"))'
+    ruby   -rjson -e 'env=JSON.parse(`xenv @production --json`)'
 
 ## design
 
@@ -73,7 +88,8 @@ Zero lock-in. Git- and agent-friendly.
 - each variable is one file: `xenv/envs/<env>/KEY.value.enc`
 - KDF params live in YAML frontmatter at the top of each per-env README
 - AES-256-CBC + HMAC-SHA256 (encrypt-then-MAC), PBKDF2-SHA256 200k iter
-- passphrase resolution: `$XENV_KEY_<ENV>` → `$XENV_KEY` → file → macOS keychain → pass
+- passphrase cascade (first hit wins, env-specific beats project-wide):
+  `$XENV_KEY_<ENV>` → `$XENV_KEY` → `<env>.key` → `_global.key` → macOS keychain → pass
 - every file is text and grep-friendly
 - nothing in xenv/ is plaintext; nothing requires a `.gitignore`
 
