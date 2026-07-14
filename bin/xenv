@@ -40,7 +40,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.10.0-posix"
+XENV_VERSION="0.11.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
@@ -837,6 +837,12 @@ argv contract: @<env> can appear ANYWHERE in argv. these are equivalent:
   xenv get @production API_KEY
   xenv @production get API_KEY
   xenv get API_KEY @production
+
+$XENV_ENV sets the default env when no @<env> is in argv (explicit @<env>
+always wins). with `export XENV_ENV=production` these need no @<env>:
+  xenv get API_KEY      xenv run ./server      xenv --json
+bare `xenv` (no verb) still prints help — dumping requires an explicit
+@<env>, so an exported XENV_ENV never spills secrets on a bare command.
 
 passphrase cascade (first hit wins, env-specific beats global per backend):
   1. $XENV_KEY_<ENV>                              env-specific env var
@@ -1798,12 +1804,23 @@ main() {
     i=$((i + 1))
   done
 
+  # No @<env> in argv → fall back to $XENV_ENV as the ambient default.
+  # An explicit @<env> always wins (this only fires when none was given).
+  # $found stays 0 here, so the env is "implicit" — see the no-verb case.
+  if [ -z "$env_name" ] && [ -n "${XENV_ENV:-}" ]; then
+    env_name=$XENV_ENV
+  fi
+
   cmd=${1:-}
   [ -n "$cmd" ] && shift
 
-  # `xenv` with no verb but with @env → print the env (run-no-cmd)
+  # `xenv` with no verb:
+  #   - explicit @<env> given  → print the env (run-no-cmd dump)
+  #   - only ambient XENV_ENV  → show help, NOT the dump. Printing secrets
+  #     just because XENV_ENV is exported in the shell would be a footgun;
+  #     require an explicit @<env> (or a verb like --json) to dump.
   if [ -z "$cmd" ]; then
-    if [ -n "$env_name" ]; then
+    if [ "$found" -eq 1 ] && [ -n "$env_name" ]; then
       cmd_envdump "$env_name"
       return $?
     fi

@@ -20,6 +20,9 @@ setup_tmp() {
   TEST_CONFIG="$TMP/config"
   mkdir -p "$TEST_CONFIG"
   export XDG_CONFIG_HOME="$TEST_CONFIG"
+  # hermetic: clear any ambient default-env leaked from a prior test or
+  # the developer's shell, so dispatch behavior is deterministic.
+  unset XENV_ENV 2>/dev/null || true
   cd "$TMP" || exit 1
 }
 
@@ -741,6 +744,57 @@ test_json_flag_not_eaten_by_run() {
   assert_eq "--json" "$out" "--json passes through to the run command"
 }
 
+test_xenv_env_default_env() {
+  # $XENV_ENV supplies the env when no @<env> is in argv.
+  xenv setup >/dev/null 2>&1
+  export XENV_ENV=production
+  out=$(xenv get APP_ENV) || { unset XENV_ENV; return 1; }
+  unset XENV_ENV
+  assert_eq "production" "$out" "XENV_ENV supplies the default env for get"
+}
+
+test_xenv_env_explicit_at_wins() {
+  # An explicit @<env> in argv beats $XENV_ENV.
+  xenv setup >/dev/null 2>&1
+  export XENV_ENV=production
+  out=$(xenv get @development APP_ENV) || { unset XENV_ENV; return 1; }
+  unset XENV_ENV
+  assert_eq "development" "$out" "explicit @env overrides XENV_ENV"
+}
+
+test_xenv_env_run_shorthand() {
+  # The run shorthand honors XENV_ENV: `xenv CMD` with no @env runs CMD
+  # with the XENV_ENV env injected.
+  xenv setup >/dev/null 2>&1
+  export XENV_ENV=production
+  out=$(xenv sh -c 'printf %s "$APP_ENV"') || { unset XENV_ENV; return 1; }
+  unset XENV_ENV
+  assert_eq "production" "$out" "XENV_ENV drives the run shorthand"
+}
+
+test_xenv_env_json() {
+  # `xenv --json` with only XENV_ENV set dumps that env.
+  xenv setup >/dev/null 2>&1
+  export XENV_ENV=production
+  out=$(xenv --json) || { unset XENV_ENV; return 1; }
+  unset XENV_ENV
+  case "$out" in *'"APP_ENV":"production"'*) ;; *) return 1 ;; esac
+}
+
+test_xenv_env_bare_shows_help_not_dump() {
+  # Bare `xenv` with only XENV_ENV set prints help, NOT the env dump —
+  # an exported XENV_ENV must never spill secrets on a bare command.
+  xenv setup >/dev/null 2>&1
+  xenv set @production SECRET=topsecret >/dev/null 2>&1
+  export XENV_ENV=production
+  out=$(xenv 2>&1)
+  unset XENV_ENV
+  echo "$out" | grep -qi "usage:" || return 1
+  # must not have dumped the env
+  echo "$out" | grep -q "SECRET=topsecret" && return 1
+  return 0
+}
+
 test_dash_dash_form_retired() {
   # `xenv -- env CMD` was the old shorthand. It's gone — @env replaces it.
   # The dispatcher should reject `--` as an unknown command.
@@ -1130,6 +1184,11 @@ run_test "@env --json escapes special chars"        test_json_dump_escapes_speci
 run_test "@env --json empty env is {}"              test_json_dump_empty_env_is_braces
 run_test "@env --json needs an env"                 test_json_dump_needs_env
 run_test "--json not eaten by run command"          test_json_flag_not_eaten_by_run
+run_test "XENV_ENV supplies default env"            test_xenv_env_default_env
+run_test "explicit @env beats XENV_ENV"             test_xenv_env_explicit_at_wins
+run_test "XENV_ENV drives run shorthand"            test_xenv_env_run_shorthand
+run_test "XENV_ENV drives --json"                   test_xenv_env_json
+run_test "bare xenv+XENV_ENV shows help not dump"   test_xenv_env_bare_shows_help_not_dump
 run_test "old `--` shorthand is retired"            test_dash_dash_form_retired
 
 # edit

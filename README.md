@@ -65,6 +65,17 @@ xenv @production get API_KEY
 xenv get API_KEY @production
 ```
 
+Or set a default env with `$XENV_ENV` and drop the token entirely (an explicit `@<env>` still wins):
+
+```
+export XENV_ENV=production
+xenv get API_KEY          # = xenv get @production API_KEY
+xenv run ./server         # = xenv run @production ./server
+xenv --json               # dump the production env as JSON
+```
+
+Bare `xenv` (no verb) still prints help — dumping an env requires an explicit `@<env>`, so an exported `XENV_ENV` never spills secrets on a bare command.
+
 ## DESCRIPTION
 
 xenv stores encrypted environment variables in a project's repository. Each variable lives in its own `<KEY>.value.enc` file as a single line of the form `xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>`. Per-env KDF parameters (`version`, `iter`, `salt`) live in YAML frontmatter at the top of a sibling `README.md`. The passphrase paired with those parameters lives outside the repo — in an environment variable, a mode-600 file under `~/.config/xenv/`, the macOS keychain, or `pass(1)`.
@@ -129,6 +140,9 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` 3.0+, `awk`, `mkt
 > What they say.
 
 ## ENVIRONMENT
+
+`XENV_ENV`
+> Default env when no `@<env>` appears in argv, e.g. `export XENV_ENV=production` then `xenv get API_KEY`. An explicit `@<env>` always wins. Does not affect bare `xenv` (still prints help, never dumps).
 
 `XENV_KEY_<ENV>`
 > Per-env passphrase. Highest priority. `<ENV>` is the env name uppercased with `-` replaced by `_`. For CI, set this as a platform secret.

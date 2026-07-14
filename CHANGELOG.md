@@ -7,6 +7,29 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.11.0-posix] — 2026-07-14
+
+### Added
+
+- **`$XENV_ENV` default env.** When no `@<env>` appears in argv, xenv uses
+  `$XENV_ENV` as the ambient env, so `export XENV_ENV=production` lets you
+  drop the token: `xenv get API_KEY`, `xenv run ./server`, `xenv --json`.
+  An explicit `@<env>` in argv always wins. Bare `xenv` (no verb) still
+  prints help rather than dumping — dumping the env requires an explicit
+  `@<env>`, so an exported `XENV_ENV` never spills secrets on a bare
+  command. The passphrase cascade is unchanged (it keys off the resolved
+  env name, so `$XENV_KEY_<ENV>` / `$XENV_KEY` still apply).
+
+- **Native recipes for Ruby, Elixir, Java, and C#** under `recipes/`,
+  joining Python/Node/Go/Rust/PHP. Each implements get/set/load against
+  the same wire format and is gated by `recipes/test` (exact-byte get,
+  load, cross-tool `set`→`xenv` decrypt, tamper→MAC-fail). CI runs the
+  round-trip suite across all nine languages.
+
+- **JSON-loader reference** in `recipes/README.md`: `xenv @<env> --json`
+  shell-out snippets for many languages, as the zero-crypto alternative
+  to a native recipe when the `xenv` binary is present at runtime.
+
 ## [0.10.0-posix] — 2026-07-14
 
 ### Added

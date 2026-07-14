@@ -70,7 +70,9 @@ Zero lock-in. Git- and agent-friendly.
     xenv edit   @production KEY              # decrypt → $EDITOR → re-encrypt
     xenv key rotate @production              # rotate passphrase, re-encrypt all
 
-The `@<env>` token may appear anywhere in argv.
+The `@<env>` token may appear anywhere in argv. Or set a default with
+`export XENV_ENV=production` and drop it: `xenv get API_KEY`. An explicit
+`@<env>` always wins; bare `xenv` still prints help, never dumps.
 
 ## load an env from any language
 
