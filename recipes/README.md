@@ -53,6 +53,8 @@ need a recipe at all. Shell out to it and parse the JSON:
 ```sh
 xenv @production --json
 # → {"HELLO":"world","DATABASE_URL":"postgres://localhost/demo",...}
+
+xenv --json            # single-env repo: @<env> optional (resolves to the sole env)
 ```
 
 ```python
@@ -130,14 +132,24 @@ A recipe's job: given an env name, find/read/write `.value.enc` files using the 
 <root>/xenv/
 ├── README.md                              # frontmatter holds project state (recipes can ignore)
 └── envs/
-    └── <env_name>/
-        ├── README.md                      # frontmatter holds KDF params (READ THIS)
-        ├── <KEY1>.value.enc               # one encrypted value per file
-        ├── <KEY2>.value.enc
-        └── ...
+    ├── <env_name>/                        # one or more envs (a repo may have just one)
+    │   ├── README.md                      # frontmatter holds KDF params (READ THIS)
+    │   ├── <KEY1>.value.enc               # one encrypted value per file
+    │   ├── <KEY2>.value.enc
+    │   └── ...
+    └── ...
 ```
 
+A project may have a **single env** (the common case — `xenv setup` creates
+one named `development`) or several (`production`, `staging`, …). A recipe is
+always told which env to operate on, so it doesn't care how many exist. The
+shell tool has a convenience the recipe contract deliberately omits: if the
+repo has exactly one env, `@<env>` is optional (`xenv --json` resolves to the
+sole env). Recipes stay explicit — always pass `env_name`.
+
 Recipes find `<root>/xenv/` via `$XENV_ROOT` (default `./xenv/` relative to cwd).
+To discover env names, list the subdirectories of `<root>/xenv/envs/`; if there
+is exactly one, that is the obvious default to load.
 
 ## per-env README frontmatter
 
