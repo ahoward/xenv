@@ -270,6 +270,17 @@ A recipe is correct if, given the checked-in `recipes/xenv/` and `$XENV_KEY_PROD
 
 `recipes/test` runs all five assertions against every recipe. `recipes/try` does a friendlier demo run.
 
+### conformance vectors (offline, tool-free)
+
+`recipes/vectors/` is the durable half of the gate: a self-contained
+oracle (`vectors.json`) plus two reference verifiers (`verify.rb`,
+`verify.js`). Given only that JSON — no `xenv` binary, no vault, no
+network — any implementation can prove its decrypt path byte-exact and
+its tamper-rejection correct. Port ~20 lines of crypto, run it against
+`vectors.json`, done. This is what lets an agent generate a loader and
+check its own work with no human in the loop. See
+[`recipes/vectors/README.md`](vectors/README.md).
+
 ## scripts
 
 `recipes/build`
