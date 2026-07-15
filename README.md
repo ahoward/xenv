@@ -2,20 +2,28 @@
 
 ## NAME
 
-xenv — a durable, encrypted environment-variable **format you own**, and a POSIX tool that speaks it
+xenv — encrypted environment variables you commit straight into your repo
 
 ## WHY
 
-Environment management is a mess. Plaintext `.env` files one `git add` from a public repo. Secrets smeared across a KMS, a CI settings panel, a `.envrc`, and a Slack thread. Formats you can't read without the vendor that made them.
+Your secrets are one `git add .` from a public repo. Every fix — a KMS, a CI secrets panel, a `.env` in `.gitignore`, a pre-commit hook — puts an easy path (paste it in a file) next to the secure path, and humans take the easy one. Some [actively disable the guardrails](#rationale) first.
 
-xenv makes the opposite bet: **the format is the product; the tool is disposable.** Your secrets live as AES-256 envelopes committed *into* your repo — one file per variable, safe to share, useless without the passphrase that never touches the tree. The entire cryptosystem is three ~15-line functions. If xenv vanished tomorrow, a 20-line decryptor in any language still opens your data — and we ship the [test vectors](recipes/vectors/) that prove it.
+xenv removes the choice. There is no plaintext on disk to commit. Each variable is a separate AES-256 file that lives *in* your repo — safe to push, useless without the passphrase, which never touches the tree.
 
-- **Encrypted, per-key, commit-safe.** No `.gitignore` to forget, no plaintext on disk, no easy/secure split. The right thing is the only thing.
-- **One auditable core, many thin readers.** A single POSIX script *writes*; tiny read-only loaders in any language *read*. The wire format is the contract between them.
-- **Durable by construction.** The format is frozen and documented; conformance vectors let anyone verify an implementation offline — no tool, no network — forever.
-- **Built for the age of AI.** Agents load an env as one JSON object, verify a loader against published vectors, and can never leak what was never on disk.
+```sh
+xenv set @production STRIPE_KEY=sk_live_...    # → one encrypted file, safe to commit
+xenv @production ./deploy                       # decrypt at exec-time; nothing hits disk
+xenv @production --json | jq -r .DATABASE_URL   # load into any language
+```
 
-🤖 the ENV for AI — encrypted, per-key, safe-to-commit env vars. POSIX. zero dependencies. zero lock-in. zero runtime. git- and agent-native.
+It's a single POSIX shell script over `openssl(1)` — no daemon, no service, no account, no SaaS, no lock-in. The crypto is three ~15-line functions; read them and you've read xenv. The wire format is documented, frozen, and shipped with [conformance vectors](recipes/vectors/), so if the tool ever vanished a 20-line decryptor in any language still opens your data.
+
+**The bet: the format is the product; the tool is disposable.**
+
+- **Commit-safe by construction** — no plaintext on disk, no `.gitignore` to forget, no easy/secure split.
+- **Just `sh` + `openssl`** — one writer, no runtime service; nine read-only reimplementations (Python/Node/Ruby/Go/Rust/PHP/Java/C#/Elixir), all cross-verified in CI.
+- **The format is the spec** — three tiny crypto functions, an offline oracle to prove any implementation, zero vendor to outlive.
+- **Agent-ready** — `xenv @env --json` loads an env in any language; an agent can't leak what was never on disk.
 
 ```
 xenv
@@ -120,7 +128,7 @@ xenv stores encrypted environment variables in a project's repository. Each vari
 
 Every file in `xenv/` is safe to commit by design. The encryption key is the only thing that must not be committed; the design makes it impossible to put it there by accident.
 
-xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` 3.0+, `awk`, `mktemp`, and `od`. After `xenv setup`, the script copies itself into `xenv/bin/xenv` inside the project — clone on a new machine, put `myproject/xenv/bin` on `$PATH`, no re-install needed.
+xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` **3.0+**, `awk`, `mktemp`, and `od`. The one real catch: it uses `openssl kdf`, which LibreSSL lacks — so on stock macOS you need a real OpenSSL 3 (`brew install openssl`), not the system default. After `xenv setup`, the script copies itself into `xenv/bin/xenv` inside the project — clone on a new machine, put `myproject/xenv/bin` on `$PATH`, no re-install needed.
 
 ## COMMANDS
 

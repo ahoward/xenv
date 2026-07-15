@@ -38,62 +38,88 @@ Allow: /
 EOF
 
 cat > "$DIST/llms.txt" <<'EOF'
-# xenv — 🤖 the ENV for AI
+# xenv — the ENV for AI
 
-Encrypted, per-key, safe-to-commit env vars. POSIX. Zero dependencies.
-Zero lock-in. Git- and agent-friendly.
+Encrypted, per-key, commit-safe environment variables. A POSIX shell
+script plus openssl. Zero deps, zero lock-in, zero runtime. Every file
+in xenv/ is safe to commit; the passphrase is the only secret and it
+never lives in the repo.
 
-> A pure-POSIX shell tool for per-key encrypted environment variables.
-> Every file in xenv/ is safe to commit by design — encrypted at rest,
-> the passphrase lives outside the repo in your keychain / pass / a file
-> under ~/.config/xenv/projects/<id>/keys/. Agents that run `git add .`
-> can't leak what isn't there. The format is documented in
-> recipes/README.md so any coding agent can build its own minimal-but-
-> complete recipe in any language.
+This file is written for coding agents. If you are an agent in a repo
+that contains an `xenv/` directory, this is your operating manual.
 
-## install
+## detect
 
-    git clone https://github.com/ahoward/xenv
-    cp xenv/bin/xenv ~/bin/xenv && chmod +x ~/bin/xenv
+A project uses xenv iff it has an `xenv/` directory:
 
-## usage
+    xenv/
+    ├── README.md                   # project id (YAML frontmatter)
+    └── envs/<env>/
+        ├── README.md               # KDF params for v3 values (frontmatter)
+        └── <KEY>.value.enc         # one encrypted value per file
 
-    xenv setup                               # bootstrap xenv/ in this project
-    xenv set    @production KEY=value        # store an encrypted value
-    xenv set    @production KEY < file       # multi-line / binary value
-    xenv get    @production KEY              # decrypt (silent on success)
-    xenv list   @production                  # list key names (no passphrase needed)
-    xenv run    @production ./server         # exec a command with env injected
-    xenv @production ./server                # shorthand for run
-    xenv @production                         # no CMD: print KEY=value lines
-    xenv @production --json                  # print the env as one JSON object
-    xenv edit   @production KEY              # decrypt → $EDITOR → re-encrypt
-    xenv key rotate @production              # rotate passphrase, re-encrypt all
+The environments are the subdirectories of `xenv/envs/` (e.g. production).
 
-The `@<env>` token may appear anywhere in argv. Or set a default with
-`export XENV_ENV=production` and drop it: `xenv get API_KEY`. An explicit
-`@<env>` always wins; bare `xenv` still prints help, never dumps.
+## load an env — the thing you almost always want
 
-## load an env from any language
+    xenv @<env> --json   →   {"KEY":"value", ...}   (one JSON object)
 
-`xenv @<env> --json` prints one JSON object {"KEY":"value",...}. Unlike
-KEY=value lines it is unambiguous for values with '=', quotes, newlines,
-or whitespace — so any language loads an env with its stdlib parser:
+Parse with any stdlib JSON parser. It is byte-exact and unambiguous for
+values containing '=', quotes, newlines, or whitespace. Do NOT read
+`.value.enc` files directly and do NOT reimplement crypto when the `xenv`
+binary is present — shell out:
 
-    python3 -c 'import json,subprocess; env=json.loads(subprocess.run(["xenv","@production","--json"],capture_output=True,text=True).stdout)'
-    node   -e 'const env=JSON.parse(require("child_process").execSync("xenv @production --json"))'
-    ruby   -rjson -e 'env=JSON.parse(`xenv @production --json`)'
+    python3 -c 'import json,subprocess as s; env=json.loads(s.run(["xenv","@production","--json"],capture_output=True,text=True).stdout)'
+    node    -e 'const env=JSON.parse(require("child_process").execSync("xenv @production --json"))'
+    ruby    -rjson -e 'env=JSON.parse(`xenv @production --json`)'
+    sh      -c 'DB=$(xenv @production --json | jq -r .DATABASE_URL)'
 
-## design
+`xenv @<env> ./cmd` runs a command with the env injected (nothing hits
+disk). `xenv list @<env>` lists key names without the passphrase.
 
-- one POSIX shell script (`bin/xenv`), no daemon, no package manager
-- each variable is one file: `xenv/envs/<env>/KEY.value.enc`
-- KDF params live in YAML frontmatter at the top of each per-env README
-- AES-256-CBC + HMAC-SHA256 (encrypt-then-MAC), PBKDF2-SHA256 200k iter
-- passphrase cascade (first hit wins, env-specific beats project-wide):
-  `$XENV_KEY_<ENV>` → `$XENV_KEY` → `<env>.key` → `_global.key` → macOS keychain → pass
-- every file is text and grep-friendly
-- nothing in xenv/ is plaintext; nothing requires a `.gitignore`
+## the passphrase — never commit it
+
+It lives OUTSIDE the repo. For an app or agent at runtime it comes from
+an environment variable:
+
+    $XENV_KEY_<ENV>     e.g. $XENV_KEY_PRODUCTION   (env name upper, - → _)
+    $XENV_KEY           project-wide fallback
+
+As an agent: read the passphrase from the environment; never seek a key
+on disk, never print it, never write it into the repo.
+
+## rules for agents
+
+- NEVER decrypt to a plaintext file you might `git add`. Use `--json`
+  (in memory) or `xenv @<env> CMD` (exec-time).
+- NEVER write secrets from application code. Writing (set/edit/rotate) is
+  a human/CI action; loaders are read-only by design.
+- Everything under `xenv/` is safe to commit. The passphrase is the only
+  secret, and the design makes it impossible to commit by accident.
+
+## no binary? generate a loader and PROVE it
+
+The wire format is the spec. Each value is one line:
+
+    xenv:v3:<iv>:<ct>:<mac>                       # KDF salt/iter in the env README
+    xenv:v4:<salt>:<iter>:<iv>:<ct>:<mac>         # self-contained: salt/iter embedded
+
+Crypto: PBKDF2-SHA256 (200k) → 64 bytes → 32-byte enc-key ‖ 32-byte
+mac-key; AES-256-CBC + PKCS#7; HMAC-SHA256, encrypt-then-MAC, scope
+"<ver>:…:<iv>:<ct>". A read-only loader is ~20 lines. Full spec:
+recipes/README.md.
+
+To prove a generated loader correct with NO tool and NO network, run it
+against recipes/vectors/vectors.json — passphrase + envelopes + expected
+plaintexts for both wire versions, plus tampered cases that MUST fail.
+recipes/vectors/verify.rb and verify.js are reference verifiers.
+
+## finding the binary
+
+    $XENV_BIN   →   ./xenv/bin/xenv (vendored, committed)   →   xenv on $PATH
+
+`xenv setup` vendors a self-contained copy at `xenv/bin/xenv`, so most
+checkouts already have it — no install, no download.
 
 ## source
 
