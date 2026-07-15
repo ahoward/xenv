@@ -1,5 +1,5 @@
 {
-  "$comment": "xenv official conformance test vectors. DEMO ONLY — this passphrase and vault never appear in a real project.",
+  "$comment": "xenv official conformance test vectors. Covers v3 (README-frontmatter KDF params) and v4 (self-contained envelope). DEMO ONLY.",
   "passphrase": "demo-key-for-recipes-NOT-FOR-REAL-USE",
   "kdf": "pbkdf2-sha256",
   "cipher": "aes-256-cbc",
@@ -93,6 +93,61 @@
       "envelope": "xenv:v3:01b4aa67776b16862cdc6566748601f6:fbf3bacf3687fd87f61697ec2a2e0484:bf513e1a04b0bbe2145377aa1b757adb72f90270365b0fb9dce5b3d4cf6bbd3b",
       "expect": "mac_fail",
       "note": "HELLO ciphertext with one nibble flipped; MUST fail MAC verification, not decrypt to garbage"
+    },
+    {
+      "name": "v4_hello",
+      "wire": "v4",
+      "env": "production",
+      "key": "V4_HELLO",
+      "iter": 200000,
+      "salt": "e048f5c56c21d385beb54a63ddc84f68",
+      "envelope": "xenv:v4:e048f5c56c21d385beb54a63ddc84f68:200000:87a863d8c1eae6c30a5ab870ed6c38e7:f7e00b57d22ff38cd6a60fa44ecb04c7:d37750d048d652e19f85b62c60075762e32ccb784eae307701ed35c25600fcc1",
+      "plaintext_b64": "d29ybGQ=",
+      "expect": "ok"
+    },
+    {
+      "name": "v4_multi",
+      "wire": "v4",
+      "env": "production",
+      "key": "V4_MULTI",
+      "iter": 200000,
+      "salt": "7a0cafee8eb0835c1ccdb6d7e158b3bd",
+      "envelope": "xenv:v4:7a0cafee8eb0835c1ccdb6d7e158b3bd:200000:942ae9ba01f015d1611584ea2d480b0b:3dfe83321607396e282d37c276c1f1bb:e19298b4b84b07ba64681025b816c0462888a5a857804369cd1719f26100d65c",
+      "plaintext_b64": "bDEKbDIJdGFi",
+      "expect": "ok"
+    },
+    {
+      "name": "v4_unicode",
+      "wire": "v4",
+      "env": "production",
+      "key": "V4_UNICODE",
+      "iter": 200000,
+      "salt": "4fc26c644ac48ed176d5b4c242a36b27",
+      "envelope": "xenv:v4:4fc26c644ac48ed176d5b4c242a36b27:200000:468e18de8ca018a1665a65ebd8e0a412:b572f143525937f8852514313d8c38c3b2daa3b5c7d6622daf9a2ba1e02cd7e4:9886da7d6c868b99a99f123a50fca31dd7f74cedfe727fcfef454d345814e113",
+      "plaintext_b64": "Y2Fmw6kg4piVIOaXpeacrOiqng==",
+      "expect": "ok"
+    },
+    {
+      "name": "v4_empty",
+      "wire": "v4",
+      "env": "production",
+      "key": "V4_EMPTY",
+      "iter": 200000,
+      "salt": "6cf72616f191d4ca5ffdebac2e261bbd",
+      "envelope": "xenv:v4:6cf72616f191d4ca5ffdebac2e261bbd:200000:1ef5cc7ea260a06ef6a39e63e96ac9e7:c9363186c85bbffaea15b2f78bcfcc0c:c6a78760c21cad82fbafff7bc5426943fd57e39919367772671259941904838d",
+      "plaintext_b64": "",
+      "expect": "ok"
+    },
+    {
+      "name": "tampered-v4-hello",
+      "wire": "v4",
+      "env": "production",
+      "key": "V4_HELLO",
+      "iter": 200000,
+      "salt": "e048f5c56c21d385beb54a63ddc84f68",
+      "envelope": "xenv:v4:e048f5c56c21d385beb54a63ddc84f68:200000:87a863d8c1eae6c30a5ab870ed6c38e7:e7e00b57d22ff38cd6a60fa44ecb04c7:d37750d048d652e19f85b62c60075762e32ccb784eae307701ed35c25600fcc1",
+      "expect": "mac_fail",
+      "note": "v4 ciphertext with one nibble flipped; MUST fail MAC"
     }
   ]
 }

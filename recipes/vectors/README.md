@@ -49,10 +49,16 @@ is deliberately throwaway. It exists so the vectors are self-verifying. It
 }
 ```
 
-Coverage today (v3): a basic value, a URL, an **empty** value, a **multi-line**
-value, a **unicode** value, and one **tampered** envelope (`expect: "mac_fail"`)
-that MUST be rejected rather than decrypted to garbage. (v4 vectors land with
-the self-contained-envelope format — issue #12.)
+Coverage: both wire versions. **v3** (KDF salt/iter in the README frontmatter)
+and **v4** (self-contained — salt/iter embedded in the envelope), each with a
+basic value, an **empty** value, a **multi-line** value, a **unicode** value,
+plus a **tampered** envelope per version (`expect: "mac_fail"`) that MUST be
+rejected rather than decrypted to garbage. A conformant reader dispatches on
+the version field and passes all of them.
+
+For a `v3` vector the verifier takes `salt`/`iter` from the vector (the
+frontmatter model); for a `v4` vector it ignores them and reads salt/iter from
+the envelope itself — proving the v4 envelope is truly self-contained.
 
 ## How to self-verify a loader
 

@@ -16,26 +16,40 @@ require "openssl"
 require "json"
 require "base64"
 
-VAULT_VERSION = "v3"
-
 # (passphrase, salt-hex, iter) -> [enc_key, mac_key]
 def derive_keys(pass, salt_hex, iter)
   salt = [salt_hex].pack("H*")
-  out  = OpenSSL::PKCS5.pbkdf2_hmac(pass, salt, iter, 64, OpenSSL::Digest.new("SHA256"))
+  out  = OpenSSL::PKCS5.pbkdf2_hmac(pass, salt, iter.to_i, 64, OpenSSL::Digest.new("SHA256"))
   [out[0, 32], out[32, 32]]
 end
 
-# raw envelope string -> plaintext bytes (raises on any tamper / bad key)
-def decrypt(envelope, enc_key, mac_key)
-  tag, ver, iv_hex, ct_hex, mac_hex, extra = envelope.strip.split(":")
+# raw envelope string -> plaintext bytes (raises on any tamper / bad key).
+# Dual-read: v3 takes salt/iter from the caller (README-frontmatter model);
+# v4 is self-contained — salt/iter come from the envelope.
+def decrypt(envelope, passphrase, v3_salt, v3_iter)
+  parts = envelope.strip.split(":")
+  raise "envelope: not xenv" unless parts[0] == "xenv"
+
+  case parts[1]
+  when "v3"
+    _, _, iv_hex, ct_hex, mac_hex, extra = parts
+    salt_hex, iter = v3_salt, v3_iter
+    scope = "v3:#{iv_hex}:#{ct_hex}"
+  when "v4"
+    _, _, salt_hex, iter, iv_hex, ct_hex, mac_hex, extra = parts
+    scope = "v4:#{salt_hex}:#{iter}:#{iv_hex}:#{ct_hex}"
+  else
+    raise "envelope: unsupported version #{parts[1]}"
+  end
+
   raise "envelope: wrong field count" if extra || mac_hex.nil?
-  raise "envelope: unsupported #{tag}:#{ver}" unless tag == "xenv" && ver == VAULT_VERSION
   raise "envelope: wrong iv/mac length" unless iv_hex.length == 32 && mac_hex.length == 64
   raise "envelope: ct not block-aligned" if ct_hex.empty? || ct_hex.length % 32 != 0
-  raise "envelope: non-hex" unless (iv_hex + ct_hex + mac_hex).match?(/\A[0-9a-f]+\z/)
+  raise "envelope: non-hex" unless "#{salt_hex}#{iv_hex}#{ct_hex}#{mac_hex}".match?(/\A[0-9a-f]+\z/)
 
-  # MAC verify FIRST — encrypt-then-MAC, constant-time, scope binds version+iv+ct.
-  scope    = "#{VAULT_VERSION}:#{iv_hex}:#{ct_hex}"
+  enc_key, mac_key = derive_keys(passphrase, salt_hex, iter)
+
+  # MAC verify FIRST — encrypt-then-MAC, constant-time.
   expected = OpenSSL::HMAC.digest("SHA256", mac_key, scope)
   provided = [mac_hex].pack("H*")
   unless expected.bytesize == provided.bytesize &&
@@ -55,10 +69,9 @@ pass = data.fetch("passphrase")
 fail_count = 0
 
 data.fetch("vectors").each do |v|
-  enc, mac = derive_keys(pass, v.fetch("salt"), v.fetch("iter"))
-  label = "#{v['name']} (#{v['expect']})"
+  label = "#{v['name']} (#{v['wire']} #{v['expect']})"
   begin
-    got = decrypt(v.fetch("envelope"), enc, mac)
+    got = decrypt(v.fetch("envelope"), pass, v.fetch("salt"), v.fetch("iter"))
     if v["expect"] == "ok"
       want = Base64.decode64(v.fetch("plaintext_b64"))
       if got == want
