@@ -1,32 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 236" width="680" height="236" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" role="img" aria-label="xenv — encrypted env, one file per key">
-  <rect x="1.5" y="1.5" width="677" height="233" rx="16" fill="#0B0E14" stroke="#242A34" stroke-width="1.5"/>
-  <text x="150" y="50" font-size="15" letter-spacing="2" fill="#33212C">xenv:v4:&lt;salt&gt;:&lt;iter&gt;:&lt;iv&gt;:&lt;ct&gt;:&lt;mac&gt;</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 240" width="660" height="240" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-label="xenv — encrypted env, one file per key">
+  <defs>
+    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF2D9B"/>
+      <stop offset="1" stop-color="#FF7AC6"/>
+    </linearGradient>
+  </defs>
 
-  <!-- pirate mark: skull &amp; crossed bones — flat, crisp, refined -->
-  <g transform="translate(52,64) scale(0.74)" fill="#FF2E88">
-    <g stroke="#FF2E88" stroke-width="8">
-      <line x1="12" y1="28" x2="100" y2="116"/><line x1="100" y1="28" x2="12" y2="116"/>
-    </g>
-    <g fill="#FF2E88">
-      <circle cx="10" cy="24" r="6"/><circle cx="18" cy="32" r="6"/><circle cx="102" cy="24" r="6"/><circle cx="94" cy="32" r="6"/>
-      <circle cx="10" cy="120" r="6"/><circle cx="18" cy="112" r="6"/><circle cx="102" cy="120" r="6"/><circle cx="94" cy="112" r="6"/>
-    </g>
-    <path d="M56 8 C78 8 92 26 92 48 C92 61 87 68 83 74 L88 80 L81 84
-             C80 95 73 103 66 106 L64 116 L48 116 L46 106 C39 103 32 95 31 84
-             L24 80 L29 74 C25 68 20 61 20 48 C20 26 34 8 56 8 Z"/>
-    <path d="M28 46 L46 52 L44 64 L29 60 Z" fill="#0B0E14"/>
-    <path d="M84 46 L66 52 L68 64 L83 60 Z" fill="#0B0E14"/>
-    <path d="M51 64 L61 64 L56 78 Z" fill="#0B0E14"/>
-    <g fill="#0B0E14">
-      <rect x="44" y="86" width="24" height="2.4"/>
-      <rect x="50" y="86" width="2.4" height="20"/><rect x="56.8" y="86" width="2.4" height="22"/><rect x="63.5" y="86" width="2.4" height="20"/>
-    </g>
+  <!-- terminal card -->
+  <rect x="6" y="6" width="648" height="228" rx="26" fill="#0B0E14" stroke="#2A2F3A" stroke-width="2"/>
+
+  <!-- wire format, as faint texture -->
+  <text x="150" y="54" font-size="16" letter-spacing="1" fill="#333B49">xenv:v4:&lt;salt&gt;:&lt;iter&gt;:&lt;iv&gt;:&lt;ct&gt;:&lt;mac&gt;</text>
+
+  <!-- padlock (hot pink) -->
+  <g transform="translate(56,78)">
+    <path d="M20 34 V22 a24 24 0 0 1 48 0 V34" fill="none" stroke="url(#pink)" stroke-width="12" stroke-linecap="round"/>
+    <rect x="6" y="34" width="76" height="64" rx="14" fill="url(#pink)"/>
+    <circle cx="44" cy="60" r="9" fill="#0B0E14"/>
+    <rect x="39" y="60" width="10" height="22" rx="5" fill="#0B0E14"/>
   </g>
 
-  <!-- wordmark: tight, crisp, no glow, no stroke -->
-  <text x="150" y="172" font-size="126" font-weight="700" letter-spacing="-4" fill="#FF2E88">xenv</text>
-  <g fill="#FF2E88"><circle cx="250" cy="76" r="5.5"/><circle cx="266" cy="76" r="5.5"/></g>
-  <rect x="468" y="90" width="11" height="86" fill="#FF2E88"/>
+  <!-- wordmark -->
+  <text x="150" y="172" font-size="112" font-weight="800" letter-spacing="-2" fill="url(#pink)">xenv</text>
 
-  <text x="152" y="206" font-size="17" letter-spacing="1" fill="#79828F">encrypted env · one file per key · POSIX</text>
+  <!-- blinking cursor -->
+  <rect x="452" y="88" width="46" height="90" rx="4" fill="#FF2D9B">
+    <animate attributeName="opacity" values="1;1;0.08;0.08" keyTimes="0;0.5;0.5;1" dur="1.06s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- tagline -->
+  <text x="152" y="208" font-size="18" letter-spacing="0.5" fill="#7C8698">encrypted env · one file per key · POSIX</text>
 </svg>
