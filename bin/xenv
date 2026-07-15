@@ -40,7 +40,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.12.0-posix"
+XENV_VERSION="0.13.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
@@ -56,7 +56,7 @@ XENV_README_FILE="README.md"
 XENV_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/xenv"
 XENV_PROJECTS_DIR="$XENV_CONFIG/projects"
 
-XENV_DEFAULT_ENVS="testing development staging production"
+XENV_DEFAULT_ENV="development"
 
 # ── output ────────────────────────────────────────────────────────
 
@@ -973,8 +973,11 @@ cmd_help() {
 xenv — per-key encrypted environment store
 
 usage:
-  xenv setup                         bootstrap: create xenv/ (if absent),
-                                     or adopt existing (prompts per env)
+  xenv setup [<env>...]              bootstrap: create xenv/ (if absent),
+                                     or adopt existing (prompts per env).
+                                     no names → one env "development";
+                                     names → those envs. one env = the
+                                     implicit default (no @<env> needed).
   xenv environments                  list environments
   xenv help | version
 
@@ -1013,11 +1016,15 @@ argv contract: @<env> can appear ANYWHERE in argv. these are equivalent:
   xenv @production get API_KEY
   xenv get API_KEY @production
 
-$XENV_ENV sets the default env when no @<env> is in argv (explicit @<env>
-always wins). with `export XENV_ENV=production` these need no @<env>:
+default env when no @<env> is in argv (first hit wins; explicit @<env>
+always wins over both):
+  1. $XENV_ENV                        e.g. export XENV_ENV=production
+  2. the sole env                     if the repo has exactly one env
+so in a single-env repo these need no @<env>, zero config:
   xenv get API_KEY      xenv run ./server      xenv --json
-bare `xenv` (no verb) still prints help — dumping requires an explicit
-@<env>, so an exported XENV_ENV never spills secrets on a bare command.
+multi-env repos stay explicit: name @<env> or set $XENV_ENV. bare `xenv`
+(no verb) still prints help — dumping requires an explicit @<env>, so an
+implicit default never spills secrets on a bare command.
 
 passphrase cascade (first hit wins, env-specific beats global per backend):
   1. $XENV_KEY_<ENV>                              env-specific env var
@@ -1093,6 +1100,7 @@ EOF
 # bootstrap a fresh project: write tree, generate or honor pinned
 # passphrases, stash keys. Called by cmd_setup when ./xenv/ is absent.
 setup_fresh() {
+  envs=$1
   mkdir -p "$XENV_DIR/bin" "$XENV_DIR/envs"
 
   project_id=$(new_project_id)
@@ -1137,7 +1145,7 @@ setup_fresh() {
   else
     # check if ANY env lacks a $XENV_KEY_<ENV> — if so, we'll need a global
     needs_global=0
-    for env_name in $XENV_DEFAULT_ENVS; do
+    for env_name in $envs; do
       vname=$(env_var_name "$env_name")
       eval "v=\${$vname:-}"
       [ -z "$v" ] && needs_global=1
@@ -1153,7 +1161,7 @@ setup_fresh() {
   # Now walk each env: write the env README, store per-env passphrase
   # if $XENV_KEY_<ENV> is set (overrides global for that env), then
   # write the starter APP_ENV value.
-  for env_name in $XENV_DEFAULT_ENVS; do
+  for env_name in $envs; do
     init_env_dir "$env_name"
 
     salt_hex=$(openssl rand -hex "$XENV_SALT_BYTES")
@@ -1170,11 +1178,17 @@ setup_fresh() {
       || die "could not write APP_ENV for $env_name"
   done
 
-  info "set up $XENV_DIR/ with envs: $XENV_DEFAULT_ENVS"
+  info "set up $XENV_DIR/ with envs:$(printf ' %s' $envs)"
   info "project id: $project_id"
   info "passphrases live in $XENV_PROJECTS_DIR/$project_id/keys/"
   info "your notes: $XENV_PROJECTS_DIR/$project_id/notes.md"
-  info "each env starts with APP_ENV — try: xenv get @development APP_ENV"
+  # with a single env, the @<env> token is optional — it "just works".
+  set -- $envs
+  if [ $# -eq 1 ]; then
+    info "one env → no @<env> needed. try: xenv get APP_ENV"
+  else
+    info "each env starts with APP_ENV — try: xenv get @$1 APP_ENV"
+  fi
 }
 
 # lookup_pinned_passphrase <env> — return $XENV_KEY_<ENV> or $XENV_KEY
@@ -1254,14 +1268,42 @@ setup_adopt_one() {
 
 cmd_setup() {
   if [ -d "$XENV_DIR" ]; then
-    # existing tree — adopt path
+    # existing tree — adopt path (env names are ignored; we adopt what's there)
     [ -f "$XENV_DIR/$XENV_README_FILE" ] \
       || die "$XENV_DIR/ exists but no $XENV_README_FILE — corrupt? delete or fix manually"
     setup_adopt
-  else
-    # fresh tree — bootstrap path
-    setup_fresh
+    return $?
   fi
+
+  # Fresh tree. Env names come from argv (plain words) plus an @<env> token
+  # if given; default to a single env named "$XENV_DEFAULT_ENV". One env is
+  # the common case — it becomes the implicit default (no @<env> needed).
+  #   xenv setup                → one env: development
+  #   xenv setup production      → one env: production
+  #   xenv setup testing staging production   → a spread (each needs @<env>)
+  envs=$*
+  [ -n "$env_name" ] && envs="$env_name $envs"
+  [ -n "$envs" ] || envs=$XENV_DEFAULT_ENV
+  for e in $envs; do
+    is_env_name "$e" || die "invalid env name: $e (allowed: A-Za-z0-9_-)"
+  done
+  setup_fresh "$envs"
+}
+
+# sole_env — if exactly one env exists under xenv/envs/, print its name;
+# otherwise fail. Powers the zero-config default: a one-env repo needs no
+# @<env>. Returns non-zero for zero or multiple envs (caller falls through).
+sole_env() {
+  [ -d "$XENV_DIR/envs" ] || return 1
+  count=0
+  only=
+  for d in "$XENV_DIR"/envs/*/; do
+    [ -d "$d" ] || continue
+    count=$((count + 1))
+    only=${d%/}; only=${only##*/}
+  done
+  [ "$count" -eq 1 ] || return 1
+  printf '%s' "$only"
 }
 
 cmd_environments() {
@@ -1975,6 +2017,14 @@ main() {
     env_name=$XENV_ENV
   fi
 
+  # Still nothing → if the project has exactly one env, default to it.
+  # Zero-config "just works" for a single-env repo. Multi-env repos stay
+  # ambiguous on purpose: you must name @<env> (so a stray command can't
+  # silently hit the wrong one). $found stays 0, so bare `xenv` still helps.
+  if [ -z "$env_name" ]; then
+    env_name=$(sole_env 2>/dev/null) || env_name=
+  fi
+
   # The env name is interpolated into a var name that gets eval'd during
   # passphrase resolution — reject shell metacharacters before it's used.
   if [ -n "$env_name" ]; then
@@ -2001,7 +2051,7 @@ main() {
   case "$cmd" in
     -h|--help|help)         cmd_help ;;
     -v|--version|version)   cmd_version ;;
-    setup)                  cmd_setup ;;
+    setup)                  cmd_setup "$@" ;;
     environments)           cmd_environments ;;
     key)                    cmd_key "$@" ;;
 

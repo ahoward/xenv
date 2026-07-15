@@ -7,6 +7,29 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.13.0-posix] — 2026-07-15
+
+Make the simple case just work: a single-env repo needs no `@<env>` and
+no config.
+
+### Added
+
+- **Sole-env default.** When no `@<env>` is in argv, xenv resolves the
+  env by `$XENV_ENV` → **the sole env** (if the repo has exactly one).
+  So `xenv get API_KEY`, `xenv ./server`, `xenv --json` all just work in
+  a one-env repo — zero config, no frontmatter, nothing to set. Multi-env
+  repos stay explicit (name `@<env>` or set `$XENV_ENV`) so a stray
+  command can't hit the wrong one. An explicit `@<env>` always wins, and
+  bare `xenv` still prints help (never dumps).
+
+### Changed
+
+- **`xenv setup` now creates ONE env by default** (`development`), not the
+  old four. `xenv setup <name>` makes a single named env (`xenv setup
+  production`); `xenv setup a b c …` makes a spread. One env = the implicit
+  default. Existing multi-env vaults are unaffected (they simply have no
+  sole-env default).
+
 ## [0.12.0-posix] — 2026-07-15
 
 The self-contained **v4 envelope**, dual-read everywhere, plus a security

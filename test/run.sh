@@ -99,7 +99,7 @@ test_version() {
 # ── init creates the full layout ──────────────────────────────────
 
 test_init_creates_xenv_dir() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   [ -d xenv ] || return 1
   # no .gitignore — every file in xenv/ is safe to commit
   [ ! -f .gitignore ] || return 1
@@ -107,14 +107,14 @@ test_init_creates_xenv_dir() {
 }
 
 test_init_creates_top_readme() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   [ -f xenv/README.md ] || return 1
   grep -qi "for humans" xenv/README.md || return 1
   grep -qi "for agents" xenv/README.md || return 1
 }
 
 test_init_creates_bin_xenv() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   [ -f xenv/bin/xenv ] || return 1
   [ -x xenv/bin/xenv ] || return 1
   # the embedded copy should run
@@ -122,7 +122,7 @@ test_init_creates_bin_xenv() {
 }
 
 test_init_creates_four_envs() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   [ -d xenv/envs ] || return 1
   for env_name in testing development staging production; do
     [ -d "xenv/envs/$env_name" ] || return 1
@@ -138,7 +138,7 @@ test_setup_stores_global_passphrase() {
   # Default `xenv setup` writes ONE _global.key, not per-env files.
   # All envs cascade-resolve via _global. Per-env files only appear
   # when $XENV_KEY_<ENV> was pinned or after `xenv key rotate @<env>`.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   kdir=$(project_keys_dir)
   [ -f "$kdir/_global.key" ] || return 1
   # confirm there are no per-env .key files yet (default behavior)
@@ -152,7 +152,7 @@ test_setup_honors_global_env_var() {
   # $XENV_KEY pinned at setup time → that value becomes _global.key.
   # Subsequent decrypts work both with and without the env var set.
   pinned='my-shared-passphrase'
-  XENV_KEY=$pinned xenv setup >/dev/null 2>&1
+  XENV_KEY=$pinned xenv setup testing development staging production >/dev/null 2>&1
   kdir=$(project_keys_dir)
   [ -f "$kdir/_global.key" ] || return 1
   cached=$(cat "$kdir/_global.key")
@@ -166,7 +166,7 @@ test_setup_honors_per_env_var() {
   # $XENV_KEY_<ENV> pinned at setup → per-env file gets that value.
   # The OTHER envs still get a generated _global.key.
   pinned='prod-specific-key'
-  XENV_KEY_PRODUCTION=$pinned xenv setup >/dev/null 2>&1
+  XENV_KEY_PRODUCTION=$pinned xenv setup testing development staging production >/dev/null 2>&1
   kdir=$(project_keys_dir)
   [ -f "$kdir/production.key" ] || return 1
   [ -f "$kdir/_global.key" ]    || return 1
@@ -177,7 +177,7 @@ test_setup_honors_per_env_var() {
 test_cascade_per_env_beats_global() {
   # Per-env file shadows _global file. After setting both, @prod
   # resolves to its own key, not _global.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   kdir=$(project_keys_dir)
 
   # set a value (encrypted under _global), then rotate prod (which
@@ -194,21 +194,21 @@ test_cascade_per_env_beats_global() {
 }
 
 test_key_show_no_env_describes_global() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv key show)
   echo "$out" | grep -q '_global.key' || return 1
 }
 
 test_key_show_at_env_says_via_global() {
   # @env with no per-env key set → show says "via _global fallback"
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv key show @production)
   echo "$out" | grep -q 'via _global fallback' || return 1
 }
 
 test_key_forget_global_warns_about_envs() {
   # After forgetting _global, envs without a per-env key have nowhere to go.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv key forget 2>&1)
   echo "$out" | grep -q 'envs without their own key will no longer decrypt' || return 1
 }
@@ -216,7 +216,7 @@ test_key_forget_global_warns_about_envs() {
 test_key_forget_env_notes_cascade_fallback() {
   # After forgetting a per-env key, the cascade falls back to _global.
   # The forget message should call it out.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv key rotate @production >/dev/null 2>&1
   out=$(xenv key forget @production 2>&1)
   echo "$out" | grep -q 'now resolves via _global.key' || return 1
@@ -224,7 +224,7 @@ test_key_forget_env_notes_cascade_fallback() {
 
 test_key_rotate_global_skips_per_env_keyed() {
   # Project-wide rotate touches only envs without a per-env key.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production SECRET=prod >/dev/null 2>&1
   xenv set @staging    SECRET=stg  >/dev/null 2>&1
 
@@ -245,7 +245,7 @@ test_key_rotate_global_skips_per_env_keyed() {
 }
 
 test_init_app_env_decrypts_to_env_name() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   for env_name in testing development staging production; do
     out=$(xenv get @"$env_name" APP_ENV)
     assert_eq "$env_name" "$out" "APP_ENV for $env_name" || return 1
@@ -256,7 +256,7 @@ test_init_app_env_decrypts_to_env_name() {
 test_init_per_env_readme_mentions_env_name() {
   # per-env README is intentionally minimal — it carries the crypto-state
   # frontmatter and a stub body that names the env. that's it.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   grep -q "production" xenv/envs/production/README.md || return 1
   grep -q "staging"    xenv/envs/staging/README.md    || return 1
 }
@@ -264,7 +264,7 @@ test_init_per_env_readme_mentions_env_name() {
 test_init_top_readme_documents_passphrase_env_vars() {
   # the XENV_KEY_<ENV> documentation lives in the top-level xenv/README.md
   # now — one place, not duplicated per env.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   grep -q "XENV_KEY_<ENV>" xenv/README.md || return 1
 }
 
@@ -272,7 +272,7 @@ test_setup_on_existing_tree_adopts() {
   # `xenv setup` on an existing tree no longer errors — it walks into
   # the adopt flow. With non-tty stdin and no $XENV_KEY_<ENV> set, all
   # envs are skipped (the message says so). Exit 0; the tree is intact.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv setup 2>&1)
   echo "$out" | grep -qi "adopting" || return 1
   echo "$out" | grep -qi "skipped" || return 1
@@ -282,7 +282,7 @@ test_setup_on_existing_tree_adopts() {
 # ── project id ────────────────────────────────────────────────────
 
 test_init_writes_project_id_in_top_readme() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
 
   # no standalone project.xenv anymore — the id lives in xenv/README.md's
   # frontmatter alongside the format version.
@@ -307,7 +307,7 @@ test_init_writes_project_id_in_top_readme() {
 }
 
 test_init_creates_per_project_config_dir() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   id=$(project_id)
   pdir="$TEST_CONFIG/xenv/projects/$id"
   [ -d "$pdir" ]         || return 1
@@ -317,7 +317,7 @@ test_init_creates_per_project_config_dir() {
 }
 
 test_init_origin_file_records_xenv_path() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   id=$(project_id)
   origin=$(cat "$TEST_CONFIG/xenv/projects/$id/origin")
   expected=$(cd xenv && pwd)
@@ -325,7 +325,7 @@ test_init_origin_file_records_xenv_path() {
 }
 
 test_init_notes_stub_mentions_project_id() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   id=$(project_id)
   grep -q "$id" "$TEST_CONFIG/xenv/projects/$id/notes.md" || return 1
 }
@@ -336,11 +336,11 @@ test_two_projects_same_basename_get_unique_ids() {
   mkdir -p "$TMP/a/foo" "$TMP/b/foo"
 
   cd "$TMP/a/foo"
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   id_a=$(project_id)
 
   cd "$TMP/b/foo"
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   id_b=$(project_id)
 
   # both should have "foo--" prefix
@@ -363,7 +363,7 @@ test_basename_sanitization() {
   # project basenames with weird chars get sanitized
   mkdir -p "$TMP/My Project!"
   cd "$TMP/My Project!"
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   id=$(project_id)
   # should be lowercase, non-alnum→-, collapsed runs
   case "$id" in
@@ -388,7 +388,7 @@ test_no_top_readme_means_no_key_lookup() {
 }
 
 test_init_frontmatter_params() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   rf=xenv/envs/production/README.md
   [ -f "$rf" ] || return 1
 
@@ -407,7 +407,7 @@ test_init_frontmatter_params() {
 
 test_init_value_files_are_v4_envelopes() {
   # writes are v4 (self-contained: salt + iter embedded per value).
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   case "$(cat xenv/envs/development/APP_ENV.value.enc)" in
     "xenv:v4:"*) return 0 ;;
     *) return 1 ;;
@@ -418,7 +418,7 @@ test_dual_read_v3_envelope() {
   # the tool writes v4 now, but must still READ legacy v3 envelopes.
   # Fixture: the demo HELLO=world v3 envelope from recipes/vectors, whose
   # KDF salt/iter live in the env README frontmatter (the v3 model).
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   mkdir -p xenv/envs/v3read
   cat > xenv/envs/v3read/README.md <<'EOF'
 ---
@@ -437,7 +437,7 @@ EOF
 
 test_init_bin_xenv_is_self_contained() {
   # rm the parent script's source — xenv/bin/xenv should still work
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$("$SHELL_BIN" xenv/bin/xenv get @development APP_ENV 2>&1)
   assert_eq "development" "$out" "self-contained bin works"
 }
@@ -445,27 +445,27 @@ test_init_bin_xenv_is_self_contained() {
 # ── set/get/list/unset ─────────────────────────────────────────────
 
 test_set_creates_one_value_file() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production DB_URL=postgres://localhost/db >/dev/null 2>&1
   [ -f xenv/envs/production/DB_URL.value.enc ] || return 1
 }
 
 test_set_inline_round_trip() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production GREETING="hello world" >/dev/null 2>&1
   out=$(xenv get @production GREETING)
   assert_eq "hello world" "$out" "round trip"
 }
 
 test_set_value_with_equals_signs() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production URL="https://api.example.com?key=abc&token=xyz" >/dev/null 2>&1
   out=$(xenv get @production URL)
   assert_eq "https://api.example.com?key=abc&token=xyz" "$out" "= signs"
 }
 
 test_set_value_with_quotes_no_rce() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   marker="$TMP/pwned"
   rm -f "$marker"
   xenv set @production EVIL='";touch '"$marker"';#`echo bad`' >/dev/null 2>&1
@@ -478,7 +478,7 @@ test_set_value_with_quotes_no_rce() {
 }
 
 test_set_from_stdin_multiline() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   printf 'line1\nline2\nline3' | xenv set @production MULTI >/dev/null 2>&1
   out=$(xenv get @production MULTI)
   expected=$(printf 'line1\nline2\nline3')
@@ -486,7 +486,7 @@ test_set_from_stdin_multiline() {
 }
 
 test_set_pem_key() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   pem='-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDfake==
 -----END PRIVATE KEY-----'
@@ -496,7 +496,7 @@ MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDfake==
 }
 
 test_unset_removes_file() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production FOO=bar >/dev/null 2>&1
   [ -f xenv/envs/production/FOO.value.enc ] || return 1
   xenv unset @production FOO >/dev/null 2>&1
@@ -505,13 +505,13 @@ test_unset_removes_file() {
 }
 
 test_list_shows_starter_app_env() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv list @production)
   echo "$out" | grep -q "^APP_ENV$" || return 1
 }
 
 test_list_shows_new_keys() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production ALPHA=1 >/dev/null 2>&1
   xenv set @production BETA=2 >/dev/null 2>&1
   out=$(xenv list @production)
@@ -521,13 +521,13 @@ test_list_shows_new_keys() {
 }
 
 test_get_silent_on_success() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   noise=$(xenv get @production APP_ENV 2>&1 >/dev/null)
   [ -z "$noise" ] || return 1
 }
 
 test_get_missing_key_fails() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv get @production DOESNOTEXIST >/dev/null 2>&1 && return 1
   return 0
 }
@@ -536,7 +536,7 @@ test_get_pipe_preserves_exact_bytes() {
   # When stdout is a pipe (not a tty), `xenv get` must emit exact bytes
   # with no auto-newline. This is the script-compat contract: it lets
   # `db=$(xenv get @prod URL)` capture the value verbatim.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production NO_NL=novalue >/dev/null 2>&1
 
   bytes=$(xenv get @production NO_NL | od -An -vtx1 | tr -d ' \n')
@@ -547,7 +547,7 @@ test_get_pipe_preserves_exact_bytes() {
 test_get_pipe_preserves_internal_newlines() {
   # Multi-line values must round-trip through a pipe with all internal
   # \n preserved and no extra \n at the end.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   printf 'a\nb\nc' | xenv set @production MULTI >/dev/null 2>&1
 
   bytes=$(xenv get @production MULTI | od -An -vtx1 | tr -d ' \n')
@@ -580,7 +580,7 @@ test_tty_finish_algorithm() {
 # ── envs ───────────────────────────────────────────────────────────
 
 test_envs_lists_all_four() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv environments)
   echo "$out" | grep -q "production" || return 1
   echo "$out" | grep -q "staging"    || return 1
@@ -591,7 +591,7 @@ test_envs_lists_all_four() {
 test_envs_only_iterates_envs_dir() {
   # tool dirs (xenv/bin/) and any future siblings of xenv/envs/ must NEVER
   # appear in the envs list, no matter what they're named.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   mkdir -p xenv/lib xenv/share
   out=$(xenv environments)
   echo "$out" | grep -qw "bin"   && return 1
@@ -603,7 +603,7 @@ test_envs_only_iterates_envs_dir() {
 # ── run ────────────────────────────────────────────────────────────
 
 test_run_injects_env() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production FOO=bar >/dev/null 2>&1
   xenv set @production DB_URL="postgres://localhost/test" >/dev/null 2>&1
   out=$(xenv run @production sh -c 'echo "$FOO,$DB_URL,$APP_ENV"')
@@ -611,7 +611,7 @@ test_run_injects_env() {
 }
 
 test_run_preserves_multiline() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   pem='line1
 line2
 line3'
@@ -621,13 +621,13 @@ line3'
 }
 
 test_run_propagates_exit_code() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv run @production sh -c 'exit 42' >/dev/null 2>&1
   assert_eq "42" "$?" "exit code passes through"
 }
 
 test_run_no_command_fails() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv run @production 2>&1) && return 1
   echo "$out" | grep -qi "needs a command" || return 1
 }
@@ -639,7 +639,7 @@ test_run_no_env_fails() {
 
 test_at_shorthand_runs_like_run() {
   # `xenv @<env> CMD` is the screaming-loud shorthand for `xenv run <env> CMD`.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv @production sh -c 'echo "$APP_ENV"')
   assert_eq "production" "$out" "xenv @env shorthand"
 }
@@ -647,7 +647,7 @@ test_at_shorthand_runs_like_run() {
 test_at_shorthand_propagates_exit_code() {
   # `xenv @<env> CMD` must propagate the inner command's exit code, just
   # like `xenv run` does. exec(2) replaces xenv, so exit code = inner's.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv @production sh -c 'exit 17' >/dev/null 2>&1
   [ $? -eq 17 ] || return 1
 }
@@ -656,7 +656,7 @@ test_at_empty_env_fails() {
   # `xenv @ ls` is a typo trap. `@` alone (no env name) doesn't match the
   # pre-scan extractor's `@?*` pattern, so it falls through as an unknown
   # command. Must fail loud.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv @ ls 2>&1) && return 1
   echo "$out" | grep -qi "unknown command" || return 1
 }
@@ -665,7 +665,7 @@ test_at_no_command_prints_env() {
   # `xenv @env` with no CMD prints KEY=value lines for every value in
   # the env, one per line. Same shape as env(1)'s output. Lets you peek
   # at the loaded env without exec'ing anything.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production HELLO=world >/dev/null 2>&1
   xenv set @production NUMBER=42 >/dev/null 2>&1
 
@@ -680,7 +680,7 @@ test_at_no_command_multiline_values_intact() {
   # Multi-line values appear verbatim — the dump is a sequence of
   # KEY=value pairs with internal newlines passed through. The
   # consumer can quote-massage if they want.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   printf 'line1\nline2\nline3' | xenv set @production MULTI >/dev/null 2>&1
 
   out=$(xenv @production)
@@ -693,7 +693,7 @@ test_at_no_command_multiline_values_intact() {
 test_json_dump_is_one_object() {
   # `xenv @env --json` prints one JSON object {"KEY":"value",...} on a
   # single line. Language-neutral: any stdlib JSON parser can load it.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production HELLO=world >/dev/null 2>&1
   xenv set @production NUMBER=42 >/dev/null 2>&1
 
@@ -719,7 +719,7 @@ test_json_dump_is_one_object() {
 
 test_json_dump_position_independent() {
   # --json is a verb; @env may sit before or after it.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   a=$(xenv @development --json) || return 1
   b=$(xenv --json @development) || return 1
   assert_eq "$a" "$b" "--json is position-independent w.r.t. @env"
@@ -729,7 +729,7 @@ test_json_dump_escapes_special_chars() {
   # Values with '=', quotes, backslashes, tabs, and newlines must survive
   # as valid, correctly-escaped JSON. This is the whole point of --json:
   # KEY=value lines can't represent these unambiguously.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production 'WITHEQ=a=b=c'          >/dev/null 2>&1
   xenv set @production 'QUOTED=he said "hi"'   >/dev/null 2>&1
   printf 'l1\nl2\ttab' | xenv set @production MULTI >/dev/null 2>&1
@@ -745,7 +745,7 @@ test_json_dump_escapes_special_chars() {
 
 test_json_dump_empty_env_is_braces() {
   # An env with no values dumps as "{}".
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv key generate @blank --file >/dev/null 2>&1
   out=$(xenv @blank --json) || return 1
   assert_eq "{}" "$out" "empty env dumps as {}"
@@ -753,7 +753,7 @@ test_json_dump_empty_env_is_braces() {
 
 test_json_dump_needs_env() {
   # --json with no @env is an error.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv --json 2>&1) && return 1
   echo "$out" | grep -qi "needs an env" || return 1
 }
@@ -761,14 +761,14 @@ test_json_dump_needs_env() {
 test_json_flag_not_eaten_by_run() {
   # When @env has a CMD, a trailing --json is an argument to that CMD,
   # not xenv's dump flag.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv @development sh -c 'printf %s "$1"' -- --json 2>&1) || return 1
   assert_eq "--json" "$out" "--json passes through to the run command"
 }
 
 test_xenv_env_default_env() {
   # $XENV_ENV supplies the env when no @<env> is in argv.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   export XENV_ENV=production
   out=$(xenv get APP_ENV) || { unset XENV_ENV; return 1; }
   unset XENV_ENV
@@ -777,7 +777,7 @@ test_xenv_env_default_env() {
 
 test_xenv_env_explicit_at_wins() {
   # An explicit @<env> in argv beats $XENV_ENV.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   export XENV_ENV=production
   out=$(xenv get @development APP_ENV) || { unset XENV_ENV; return 1; }
   unset XENV_ENV
@@ -787,7 +787,7 @@ test_xenv_env_explicit_at_wins() {
 test_xenv_env_run_shorthand() {
   # The run shorthand honors XENV_ENV: `xenv CMD` with no @env runs CMD
   # with the XENV_ENV env injected.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   export XENV_ENV=production
   out=$(xenv sh -c 'printf %s "$APP_ENV"') || { unset XENV_ENV; return 1; }
   unset XENV_ENV
@@ -796,7 +796,7 @@ test_xenv_env_run_shorthand() {
 
 test_xenv_env_json() {
   # `xenv --json` with only XENV_ENV set dumps that env.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   export XENV_ENV=production
   out=$(xenv --json) || { unset XENV_ENV; return 1; }
   unset XENV_ENV
@@ -806,7 +806,7 @@ test_xenv_env_json() {
 test_xenv_env_bare_shows_help_not_dump() {
   # Bare `xenv` with only XENV_ENV set prints help, NOT the env dump —
   # an exported XENV_ENV must never spill secrets on a bare command.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production SECRET=topsecret >/dev/null 2>&1
   export XENV_ENV=production
   out=$(xenv 2>&1)
@@ -817,10 +817,44 @@ test_xenv_env_bare_shows_help_not_dump() {
   return 0
 }
 
+test_setup_default_single_env() {
+  # bare `xenv setup` creates ONE env named development.
+  xenv setup >/dev/null 2>&1
+  n=$(ls -d xenv/envs/*/ 2>/dev/null | wc -l)
+  [ "$n" -eq 1 ] || return 1
+  [ -d xenv/envs/development ] || return 1
+}
+
+test_sole_env_is_default() {
+  # a single-env repo needs no @<env> — the sole env is the default.
+  xenv setup >/dev/null 2>&1
+  out=$(xenv get APP_ENV) || return 1
+  assert_eq "development" "$out" "sole env is the implicit default"
+}
+
+test_setup_named_single_env() {
+  # `xenv setup <name>` makes one env with that name; it's the default.
+  xenv setup production >/dev/null 2>&1
+  n=$(ls -d xenv/envs/*/ 2>/dev/null | wc -l)
+  [ "$n" -eq 1 ] || return 1
+  [ -d xenv/envs/production ] || return 1
+  out=$(xenv get APP_ENV) || return 1
+  assert_eq "production" "$out" "named single env is the default"
+}
+
+test_setup_spread_requires_explicit_env() {
+  # multiple envs → no implicit default; must name @<env>.
+  xenv setup testing development staging production >/dev/null 2>&1
+  out=$(xenv get APP_ENV 2>&1) && return 1
+  echo "$out" | grep -qi "needs an env" || return 1
+  out=$(xenv get @staging APP_ENV) || return 1
+  assert_eq "staging" "$out" "explicit @env works in a spread"
+}
+
 test_dash_dash_form_retired() {
   # `xenv -- env CMD` was the old shorthand. It's gone — @env replaces it.
   # The dispatcher should reject `--` as an unknown command.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv -- production sh -c 'echo gone' 2>&1) && return 1
   echo "$out" | grep -qi "unknown command" || return 1
 }
@@ -828,7 +862,7 @@ test_dash_dash_form_retired() {
 # ── edit ───────────────────────────────────────────────────────────
 
 test_edit_round_trip() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   cat > "$TMP/ed.sh" <<'EOF'
 #!/bin/sh
 printf 'changed' > "$1"
@@ -840,7 +874,7 @@ EOF
 }
 
 test_edit_no_changes_skipped() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   before=$(stat -c %Y xenv/envs/production/APP_ENV.value.enc 2>/dev/null \
            || stat -f %m xenv/envs/production/APP_ENV.value.enc 2>/dev/null)
   cat > "$TMP/noop.sh" <<'EOF'
@@ -855,7 +889,7 @@ EOF
 }
 
 test_edit_creates_new_key() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   cat > "$TMP/ed.sh" <<'EOF'
 #!/bin/sh
 printf 'created' > "$1"
@@ -869,7 +903,7 @@ EOF
 # ── rotate ─────────────────────────────────────────────────────────
 
 test_rotate_changes_key_preserves_values() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production DB=db1 >/dev/null 2>&1
   xenv set @production API=api1 >/dev/null 2>&1
   printf 'multi\nline' | xenv set @production PEM >/dev/null 2>&1
@@ -896,20 +930,20 @@ test_wrong_key_fails_mac() {
   # Tamper with the cached key: write a known-wrong value to
   # _global.key (which is what all four envs cascade to by default).
   # Decrypt under that key should fail MAC.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   echo "wrongkeywrongkeywrongkeywrongkey=" > "$(project_keys_dir)/_global.key"
   out=$(xenv get @production APP_ENV 2>&1) && return 1
   echo "$out" | grep -qi "MAC verification\|wrong key" || return 1
 }
 
 test_env_var_beats_file_backend() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   XENV_KEY_PRODUCTION="wrongkey" xenv get @production APP_ENV >/dev/null 2>&1 && return 1
   return 0
 }
 
 test_tampered_ciphertext_rejected() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   orig=$(cat xenv/envs/production/APP_ENV.value.enc)
   # v4 layout: xenv:v4:<salt>:<iter>:<iv>:<ct>:<mac>
   IFS=: read -r tag ver salt iter iv ct mac <<EOF
@@ -927,7 +961,7 @@ EOF
 test_v4_huge_iter_rejected() {
   # v4 iter is attacker-controllable and drives PBKDF2 before the MAC can
   # be checked — a huge value must be rejected fast, not run to a hang.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   printf 'xenv:v4:%032d:999999999:%032d:%032d:%064d\n' 1 2 3 4 \
     > xenv/envs/production/DOS.value.enc
   out=$(xenv get @production DOS 2>&1) && return 1
@@ -937,7 +971,7 @@ test_v4_huge_iter_rejected() {
 test_run_rejects_unsafe_key_name() {
   # a crafted filename becomes a shell var via eval in `run` — must refuse,
   # never execute. Regression for the key-name RCE.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   cp xenv/envs/production/APP_ENV.value.enc "xenv/envs/production/x;touch PWNED;.value.enc" 2>/dev/null
   out=$(xenv run @production true 2>&1) && :
   [ -f PWNED ] && return 1   # RCE happened
@@ -945,21 +979,21 @@ test_run_rejects_unsafe_key_name() {
 }
 
 test_set_rejects_bad_key_name() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv set @production 'BAD-NAME=x' 2>&1) && return 1
   echo "$out" | grep -qi "invalid key name" || return 1
 }
 
 test_bad_env_name_rejected() {
   # an env name with shell metacharacters reaches an eval in the cascade.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   out=$(xenv get '@p;touch ENVPWN' APP_ENV 2>&1) && :
   [ -f ENVPWN ] && return 1
   echo "$out" | grep -qi "invalid env name" || return 1
 }
 
 test_envelope_short_iv_rejected() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   printf 'xenv:v3:deadbeef:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n' \
     > xenv/envs/production/BAD.value.enc
   out=$(xenv get @production BAD 2>&1) && return 1
@@ -967,7 +1001,7 @@ test_envelope_short_iv_rejected() {
 }
 
 test_envelope_bad_hex_rejected() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   printf 'xenv:v3:ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n' \
     > xenv/envs/production/BAD.value.enc
   out=$(xenv get @production BAD 2>&1) && return 1
@@ -975,7 +1009,7 @@ test_envelope_bad_hex_rejected() {
 }
 
 test_envelope_extra_fields_rejected() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   printf 'xenv:v3:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff:extra\n' \
     > xenv/envs/production/BAD.value.enc
   out=$(xenv get @production BAD 2>&1) && return 1
@@ -983,7 +1017,7 @@ test_envelope_extra_fields_rejected() {
 }
 
 test_unsupported_version_rejected() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   printf 'xenv:v99:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n' \
     > xenv/envs/production/BAD.value.enc
   out=$(xenv get @production BAD 2>&1) && return 1
@@ -993,7 +1027,7 @@ test_unsupported_version_rejected() {
 # ── concurrency + atomicity ───────────────────────────────────────
 
 test_concurrent_writes_to_different_keys() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   for i in 1 2 3 4 5; do
     ( xenv set @production "KEY_$i=value_$i" >/dev/null 2>&1 ) &
   done
@@ -1006,7 +1040,7 @@ test_concurrent_writes_to_different_keys() {
 }
 
 test_concurrent_writes_to_same_key() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   for i in 1 2 3 4 5; do
     ( xenv set @production "RACE=value_$i" >/dev/null 2>&1 ) &
   done
@@ -1019,7 +1053,7 @@ test_concurrent_writes_to_same_key() {
 }
 
 test_partial_encrypt_failure_preserves() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   orig=$(cat xenv/envs/production/APP_ENV.value.enc)
 
   mkdir "$TMP/badbin"
@@ -1041,7 +1075,7 @@ EOF
 # ── per-key file structure (the defining properties) ──────────────
 
 test_each_value_is_own_file() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production ALPHA=1 >/dev/null 2>&1
   xenv set @production BETA=2 >/dev/null 2>&1
   xenv set @production GAMMA=3 >/dev/null 2>&1
@@ -1051,7 +1085,7 @@ test_each_value_is_own_file() {
 }
 
 test_files_use_value_enc_extension() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production DATABASE_URL=x >/dev/null 2>&1
   [ -f xenv/envs/production/DATABASE_URL.value.enc ] || return 1
   # explicitly NOT the old .enc extension
@@ -1062,7 +1096,7 @@ test_files_use_value_enc_extension() {
 test_no_separate_params_file() {
   # KDF params used to live in params.xenv. Now they live in the
   # README's YAML frontmatter — there should be no params file at all.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   [ -f xenv/envs/production/params.xenv ] && return 1
   [ -f xenv/envs/production/.params ]     && return 1
   return 0
@@ -1071,7 +1105,7 @@ test_no_separate_params_file() {
 test_no_separate_project_file() {
   # the project id used to live in project.xenv. it's now in the top-level
   # README's frontmatter — there should be no project.xenv anywhere.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   [ -f xenv/project.xenv ] && return 1
   [ -f xenv/.project ]     && return 1
   return 0
@@ -1080,7 +1114,7 @@ test_no_separate_project_file() {
 test_top_readme_frontmatter_has_do_not_edit_warning() {
   # the project-state frontmatter should carry the same unmissable warning
   # as the per-env crypto-state frontmatter. one pattern, applied uniformly.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   rf=xenv/README.md
   block=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{exit} p' "$rf")
   echo "$block" | grep -qi "DO NOT EDIT" || return 1
@@ -1089,7 +1123,7 @@ test_top_readme_frontmatter_has_do_not_edit_warning() {
 test_frontmatter_has_do_not_edit_warning() {
   # the frontmatter is one keystroke from breaking decryption. it must
   # carry an unmissable warning so an agent reading it knows to leave it alone.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   rf=xenv/envs/production/README.md
   block=$(awk 'NR==1 && $0=="---"{p=1;next} p && $0=="---"{exit} p' "$rf")
   echo "$block" | grep -qi "DO NOT EDIT" || return 1
@@ -1098,7 +1132,7 @@ test_frontmatter_has_do_not_edit_warning() {
 test_rotate_preserves_readme_body() {
   # rotation changes the salt+iter in the frontmatter but must not touch
   # the body — user/agent prose edits survive a key rotation.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   rf=xenv/envs/production/README.md
 
   # mark the body with something an agent might have added
@@ -1125,7 +1159,7 @@ test_frontmatter_parser_naive_split_on_first_colon() {
   # the parser splits on the FIRST colon. "key: a:b:c" should yield value "a:b:c".
   # we verify this by hand-crafting a README, then exercising decrypt — which
   # only works if read_params got the right salt out.
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   rf=xenv/envs/production/README.md
 
   # the existing salt is what works. read it, then rewrite the frontmatter
@@ -1150,14 +1184,14 @@ EOF
 }
 
 test_empty_value() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production EMPTY= >/dev/null 2>&1
   out=$(xenv get @production EMPTY)
   assert_eq "" "$out" "empty value round-trips"
 }
 
 test_set_after_unset() {
-  xenv setup >/dev/null 2>&1
+  xenv setup testing development staging production >/dev/null 2>&1
   xenv set @production FOO=v1 >/dev/null 2>&1
   xenv unset @production FOO >/dev/null 2>&1
   xenv set @production FOO=v2 >/dev/null 2>&1
@@ -1247,6 +1281,10 @@ run_test "explicit @env beats XENV_ENV"             test_xenv_env_explicit_at_wi
 run_test "XENV_ENV drives run shorthand"            test_xenv_env_run_shorthand
 run_test "XENV_ENV drives --json"                   test_xenv_env_json
 run_test "bare xenv+XENV_ENV shows help not dump"   test_xenv_env_bare_shows_help_not_dump
+run_test "setup default: one 'development' env"     test_setup_default_single_env
+run_test "sole env is the implicit default"         test_sole_env_is_default
+run_test "setup <name>: one named env"              test_setup_named_single_env
+run_test "spread requires explicit @env"            test_setup_spread_requires_explicit_env
 run_test "old `--` shorthand is retired"            test_dash_dash_form_retired
 
 # edit

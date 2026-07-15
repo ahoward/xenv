@@ -64,6 +64,9 @@ The environments are the subdirectories of `xenv/envs/` (e.g. production).
 
     xenv @<env> --json   →   {"KEY":"value", ...}   (one JSON object)
 
+If the repo has exactly one env, `@<env>` is optional — `xenv --json`
+resolves to the sole env. With several envs, name one (or set $XENV_ENV).
+
 Parse with any stdlib JSON parser. It is byte-exact and unambiguous for
 values containing '=', quotes, newlines, or whitespace. Do NOT read
 `.value.enc` files directly and do NOT reimplement crypto when the `xenv`

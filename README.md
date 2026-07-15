@@ -43,18 +43,26 @@ xenv
 ```
 
 ```sh
-xenv setup                           # bootstrap xenv/ (or adopt an existing one)
+xenv setup                           # bootstrap xenv/ with one env ("development")
+xenv set API_KEY=sk-…                # single-env repo → no @<env> needed
+xenv set TLS_CERT < cert.pem
+xenv get API_KEY                     # silent on success — pipeable
+xenv ./server                        # exec with the env injected
+xenv key rotate                      # new passphrase, re-encrypt all
+```
+
+Multiple envs? Name them at setup and address them with `@<env>`:
+
+```sh
+xenv setup testing staging production   # a spread — each addressed explicitly
 xenv set @production API_KEY=sk-…
-xenv set @production TLS_CERT < cert.pem
-xenv get @production API_KEY         # silent on success — pipeable
-xenv @production ./server            # exec with env injected
-xenv key rotate @production          # new passphrase, re-encrypt all
+xenv @production ./deploy
 ```
 
 ## SYNOPSIS
 
 ```
-xenv setup                             # bootstrap or adopt
+xenv setup [<env>...]                  # bootstrap (one env, or the named spread) / adopt
 xenv environments                      # list envs
 
 xenv key generate @<env> [--keychain | --pass | --file]
@@ -86,16 +94,16 @@ xenv @production get API_KEY
 xenv get API_KEY @production
 ```
 
-Or set a default env with `$XENV_ENV` and drop the token entirely (an explicit `@<env>` still wins):
+**You often don't need `@<env>` at all.** When no `@<env>` is in argv, xenv resolves the env by: (1) `$XENV_ENV`, then (2) **the sole env** — if the repo has exactly one, it's the default. So a single-env repo just works, zero config:
 
 ```
-export XENV_ENV=production
-xenv get API_KEY          # = xenv get @production API_KEY
-xenv ./server             # = xenv @production ./server
-xenv --json               # dump the production env as JSON
+xenv setup                # one env
+xenv get API_KEY          # no @<env> — the only env is implied
+xenv ./server
+xenv --json
 ```
 
-Bare `xenv` (no verb) still prints help — dumping an env requires an explicit `@<env>`, so an exported `XENV_ENV` never spills secrets on a bare command.
+Multi-env repos stay explicit on purpose (so a stray command can't hit the wrong one): name `@<env>` or set `$XENV_ENV`. An explicit `@<env>` always wins. Bare `xenv` (no verb) still prints help — dumping an env requires an explicit `@<env>`, so an implicit default never spills secrets on a bare command.
 
 ## THE MODEL — one spec, many interfaces
 
@@ -136,8 +144,8 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` **3.0+**, `awk`, 
 
 ## COMMANDS
 
-`setup`
-> Bootstrap or adopt. If `./xenv/` doesn't exist: create it with four default envs (testing, development, staging, production), write the project id into `xenv/README.md`, generate ONE random project-wide passphrase (`_global.key`) that all four envs share via the cascade. `$XENV_KEY` is honored as the global if set; `$XENV_KEY_<ENV>` is honored as a per-env override (writes `<env>.key`). If `./xenv/` already exists (e.g. you cloned a teammate's repo): walk each env, prompt for the passphrase (or honor `$XENV_KEY_<ENV>` / `$XENV_KEY`), decrypt one value to MAC-verify, cache to `~/.config/xenv/projects/<id>/keys/<env>.key` on success. Non-tty stdin without env vars set: skip with a warning.
+`setup [<env>...]`
+> Bootstrap or adopt. If `./xenv/` doesn't exist: create it with the named envs — or, with no names, **one env called `development`** (so a single-env repo needs no `@<env>`). `xenv setup production` makes one `production` env; `xenv setup testing staging production` makes a spread. Writes the project id into `xenv/README.md` and generates ONE random project-wide passphrase (`_global.key`) that the envs share via the cascade. `$XENV_KEY` is honored as the global if set; `$XENV_KEY_<ENV>` is honored as a per-env override (writes `<env>.key`). If `./xenv/` already exists (e.g. you cloned a teammate's repo): walk each env, prompt for the passphrase (or honor `$XENV_KEY_<ENV>` / `$XENV_KEY`), decrypt one value to MAC-verify, cache to `~/.config/xenv/projects/<id>/keys/<env>.key` on success. Non-tty stdin without env vars set: skip with a warning.
 
 `environments`
 > List envs and which have a known passphrase locally.
@@ -192,7 +200,7 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` **3.0+**, `awk`, 
 ## ENVIRONMENT
 
 `XENV_ENV`
-> Default env when no `@<env>` appears in argv, e.g. `export XENV_ENV=production` then `xenv get API_KEY`. An explicit `@<env>` always wins. Does not affect bare `xenv` (still prints help, never dumps).
+> Default env when no `@<env>` appears in argv, e.g. `export XENV_ENV=production` then `xenv get API_KEY`. Checked before the sole-env fallback; an explicit `@<env>` always wins. Does not affect bare `xenv` (still prints help, never dumps).
 
 `XENV_KEY_<ENV>`
 > Per-env passphrase. Highest priority. `<ENV>` is the env name uppercased with `-` replaced by `_`. For CI, set this as a platform secret.
