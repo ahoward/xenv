@@ -2,11 +2,20 @@
 
 ## NAME
 
-xenv — encrypted environment variables, one file per key
+xenv — a durable, encrypted environment-variable **format you own**, and a POSIX tool that speaks it
 
-## TL;DR;
+## WHY
 
-🤖 the ENV for AI — encrypted, per-key, safe-to-commit env vars. POSIX. zero dependencies. zero lock-in. git- and agent-friendly.
+Environment management is a mess. Plaintext `.env` files one `git add` from a public repo. Secrets smeared across a KMS, a CI settings panel, a `.envrc`, and a Slack thread. Formats you can't read without the vendor that made them.
+
+xenv makes the opposite bet: **the format is the product; the tool is disposable.** Your secrets live as AES-256 envelopes committed *into* your repo — one file per variable, safe to share, useless without the passphrase that never touches the tree. The entire cryptosystem is three ~15-line functions. If xenv vanished tomorrow, a 20-line decryptor in any language still opens your data — and we ship the [test vectors](recipes/vectors/) that prove it.
+
+- **Encrypted, per-key, commit-safe.** No `.gitignore` to forget, no plaintext on disk, no easy/secure split. The right thing is the only thing.
+- **One auditable core, many thin readers.** A single POSIX script *writes*; tiny read-only loaders in any language *read*. The wire format is the contract between them.
+- **Durable by construction.** The format is frozen and documented; conformance vectors let anyone verify an implementation offline — no tool, no network — forever.
+- **Built for the age of AI.** Agents load an env as one JSON object, verify a loader against published vectors, and can never leak what was never on disk.
+
+🤖 the ENV for AI — encrypted, per-key, safe-to-commit env vars. POSIX. zero dependencies. zero lock-in. zero runtime. git- and agent-native.
 
 ```
 xenv
@@ -75,6 +84,35 @@ xenv --json               # dump the production env as JSON
 ```
 
 Bare `xenv` (no verb) still prints help — dumping an env requires an explicit `@<env>`, so an exported `XENV_ENV` never spills secrets on a bare command.
+
+## THE MODEL — one spec, many interfaces
+
+xenv is three things, in order of durability:
+
+1. **The wire format** — the actual core. One line per secret: `xenv:v3:<iv>:<ct>:<mac>` — AES-256-CBC, encrypt-then-MAC, PBKDF2-SHA256-derived keys. Documented as a spec in [`recipes/README.md`](recipes/README.md). Everything conforms to this or it's out.
+2. **The reference writer** — this POSIX tool. The one thing that *mutates* a vault: `set`, `edit`, `rotate`, key management. Auditable in an afternoon — ~1000 lines of `sh` around `openssl(1)`.
+3. **Read-only loaders** — in any language. At runtime an app only needs to *read* its env, and a loader is ~20 lines of crypto with no write path — so no loader can ever corrupt a vault. One writer, many readers.
+
+The proof that they interoperate isn't trust — it's [`recipes/vectors/`](recipes/vectors/): a self-contained oracle (`vectors.json` plus reference verifiers) that any implementation checks itself against with **no tool, no vault, and no network**. Port the ~20-line decrypt path, run it against the vectors; green means your loader speaks xenv, forever. Today there are native loaders in nine languages (Python, Node, Ruby, Go, Rust, PHP, Java, C#, Elixir), all cross-verified in CI.
+
+## FOR AI AGENTS
+
+An agent working in a repo can treat xenv as a black box with a JSON seam:
+
+- **Detect:** an `xenv/` directory means secrets are managed here.
+- **Load:** `xenv @<env> --json` → one JSON object, parseable by any stdlib. Never read `.value.enc` files directly.
+- **Passphrase:** comes from the environment (`$XENV_KEY_<ENV>` / `$XENV_KEY`) — an agent never needs, and should never seek, a key on disk.
+- **Never write secrets from application code.** Writing belongs to the tool / CI / a human. Loaders are read-only on purpose.
+- **Verify offline:** the [vectors](recipes/vectors/) are the conformance oracle — generate a loader, prove it correct, no human in the loop.
+
+## ROADMAP
+
+Where this is heading (tracked in [issues](https://github.com/ahoward/xenv/issues)); the north star is that an agent, given only the spec and the vectors, can load an env — or generate a correct loader and *prove* it — with no human in the loop:
+
+- **Self-contained v4 envelope** (#12) — salt + iterations embedded per value, so a single `.value.enc` decrypts in isolation, no sibling README required. The ultimate "recover one secret, decades later, in any language" primitive.
+- **Read-only loaders as the default** (#16, #17) — recipes become pure readers; the conformance gate becomes *the tool writes → every loader reads it back byte-exact and rejects tampering.*
+- **Provision-on-demand + `xenv loader <lang>`** (#20–#24) — resolve or fetch the core by convention (pinned + checksummed, never silent); the tool emits its own read-only loaders; a `version --json` capability probe for agents.
+- **Portability** (#25) — close the stock-macOS/LibreSSL gap so the writer runs everywhere the readers already do.
 
 ## DESCRIPTION
 
@@ -341,7 +379,7 @@ The encrypt and decrypt functions in this repo *are* the spec. ~15 lines each:
 - [`encrypt_value`](bin/xenv#L278) — plaintext → `xenv:v3:<iv>:<ct>:<mac>`. AES-256-CBC + HMAC-SHA256.
 - [`decrypt_value`](bin/xenv#L301) — envelope → plaintext. MAC verify first, then decrypt.
 
-Read those three functions and you've read xenv. No proprietary format, no library lock-in, no runtime. xenv is a convention plus a 1000-line POSIX shell wrapper around `openssl(1)`. To prove this, [`recipes/`](recipes/) holds reference implementations in Python, Node, Go, Rust, and PHP — the PHP one was built by Google's Gemini from `recipes/README.md` alone, zero edits. All generated from a single prompt.
+Read those three functions and you've read xenv. No proprietary format, no library lock-in, no runtime. xenv is a convention plus a ~1000-line POSIX shell wrapper around `openssl(1)`. To prove it, [`recipes/`](recipes/) holds reference implementations in nine languages — Python, Node, Ruby, Go, Rust, PHP, Java, C#, and Elixir — all cross-verified in CI; the PHP one was built by Google's Gemini from `recipes/README.md` alone, zero edits. And [`recipes/vectors/`](recipes/vectors/) freezes the whole thing into an offline, tool-free conformance oracle: `vectors.json` plus reference verifiers that any new implementation checks itself against.
 
 ```sh
 cd recipes && ./build && ./try         # see every recipe round-trip a real vault
@@ -364,9 +402,10 @@ Each leak follows the same pattern: tooling offered a *secure path* (vault, KMS,
 test/run.sh                          # uses $SHELL_BIN or /bin/sh
 SHELL_BIN=/usr/bin/dash test/run.sh  # verify strict POSIX
 recipes/test                         # round-trip against every recipe (incl. cross-tool)
+ruby recipes/vectors/verify.rb       # offline conformance vectors (also verify.js)
 ```
 
-66 shell tests, 24 loader assertions. Covers init layout, per-key file model, frontmatter parser at both scopes, rotation preserving the body, MAC tamper detection, multi-line and PEM values, concurrent writes, partial-failure atomicity, env-var precedence, tty-aware output.
+90 shell tests; 72 loader assertions across nine languages; plus the offline conformance vectors. Covers init layout, per-key file model, frontmatter parser at both scopes, rotation preserving the body, MAC tamper detection, multi-line / unicode / PEM / binary values, concurrent writes, partial-failure atomicity, env-var precedence, `$XENV_ENV` dispatch, tty-aware output, and byte-exact cross-tool round-trips.
 
 ## SEE ALSO
 
