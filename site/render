@@ -1,0 +1,28 @@
+#!/bin/sh
+# site/render — rasterize an SVG to PNG with whatever renderer is installed.
+# Tool-agnostic, like the rest of xenv: tries rsvg-convert, resvg, cairosvg,
+# then inkscape. Handy for previewing site/logo.svg without a browser.
+#
+# usage: site/render <in.svg> [out.png] [scale]
+#   site/render site/logo.svg                 # → site/logo.png at 2x
+#   site/render site/logo.svg /tmp/l.png 3    # → 3x
+
+set -eu
+src=${1:?usage: site/render <in.svg> [out.png] [scale]}
+out=${2:-${src%.svg}.png}
+scale=${3:-2}
+
+if command -v rsvg-convert >/dev/null 2>&1; then
+  rsvg-convert -z "$scale" -o "$out" "$src"
+elif command -v resvg >/dev/null 2>&1; then
+  resvg --zoom "$scale" "$src" "$out"
+elif python3 -c 'import cairosvg' >/dev/null 2>&1; then
+  python3 -c "import cairosvg; cairosvg.svg2png(url='$src', write_to='$out', scale=$scale)"
+elif command -v inkscape >/dev/null 2>&1; then
+  inkscape "$src" --export-type=png --export-filename="$out" >/dev/null 2>&1
+else
+  echo "site/render: install one of rsvg-convert (librsvg2-bin), resvg," >&2
+  echo "             cairosvg (pip install cairosvg), or inkscape." >&2
+  exit 1
+fi
+echo "wrote $out"

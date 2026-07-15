@@ -1,33 +1,47 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 240" width="660" height="240" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-label="xenv — encrypted env, one file per key">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 240" width="680" height="240" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" role="img" aria-label="xenv — encrypted env, one file per key">
   <defs>
-    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#FF2D9B"/>
-      <stop offset="1" stop-color="#FF7AC6"/>
+    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF12A6"/><stop offset="1" stop-color="#FF6ED8"/>
     </linearGradient>
+    <filter id="glow" x="-45%" y="-45%" width="190%" height="190%">
+      <feGaussianBlur stdDeviation="4.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
 
   <!-- terminal card -->
-  <rect x="6" y="6" width="648" height="228" rx="26" fill="#0B0E14" stroke="#2A2F3A" stroke-width="2"/>
+  <rect x="6" y="6" width="668" height="228" rx="26" fill="#0B0E14" stroke="#2A2F3A" stroke-width="2"/>
 
-  <!-- wire format, as faint texture -->
-  <text x="150" y="54" font-size="16" letter-spacing="1" fill="#333B49">xenv:v4:&lt;salt&gt;:&lt;iter&gt;:&lt;iv&gt;:&lt;ct&gt;:&lt;mac&gt;</text>
+  <!-- wire format, faint texture -->
+  <text x="152" y="52" font-size="16" letter-spacing="1" fill="#3A2740">xenv:v4:&lt;salt&gt;:&lt;iter&gt;:&lt;iv&gt;:&lt;ct&gt;:&lt;mac&gt;</text>
 
-  <!-- padlock (hot pink) -->
-  <g transform="translate(56,78)">
-    <path d="M20 34 V22 a24 24 0 0 1 48 0 V34" fill="none" stroke="url(#pink)" stroke-width="12" stroke-linecap="round"/>
-    <rect x="6" y="34" width="76" height="64" rx="14" fill="url(#pink)"/>
-    <circle cx="44" cy="60" r="9" fill="#0B0E14"/>
-    <rect x="39" y="60" width="10" height="22" rx="5" fill="#0B0E14"/>
+  <!-- Jolly Roger: skull &amp; crossbones (neon pink) -->
+  <g transform="translate(42,60)" filter="url(#glow)">
+    <g fill="url(#neon)" stroke="url(#neon)" stroke-width="14" stroke-linecap="round">
+      <line x1="8" y1="30" x2="104" y2="118"/>
+      <line x1="104" y1="30" x2="8" y2="118"/>
+      <circle cx="6" cy="24" r="8" stroke="none"/><circle cx="16" cy="34" r="8" stroke="none"/>
+      <circle cx="106" cy="24" r="8" stroke="none"/><circle cx="96" cy="34" r="8" stroke="none"/>
+      <circle cx="6" cy="124" r="8" stroke="none"/><circle cx="16" cy="114" r="8" stroke="none"/>
+      <circle cx="106" cy="124" r="8" stroke="none"/><circle cx="96" cy="114" r="8" stroke="none"/>
+    </g>
+    <circle cx="56" cy="50" r="40" fill="url(#neon)"/>
+    <path d="M34 78 h44 v6 q0 16 -22 16 q-22 0 -22 -16 z" fill="url(#neon)"/>
+    <circle cx="43" cy="52" r="13.5" fill="#0B0E14"/>
+    <circle cx="69" cy="52" r="13.5" fill="#0B0E14"/>
+    <path d="M56 64 l8 13 h-16 z" fill="#0B0E14"/>
+    <g fill="#0B0E14"><rect x="53" y="86" width="6" height="18"/><rect x="44" y="88" width="5" height="14"/><rect x="63" y="88" width="5" height="14"/></g>
   </g>
 
   <!-- wordmark -->
-  <text x="150" y="172" font-size="112" font-weight="800" letter-spacing="-2" fill="url(#pink)">xenv</text>
+  <text x="176" y="174" font-size="116" font-weight="800" letter-spacing="-2"
+        fill="url(#neon)" stroke="url(#neon)" stroke-width="3.5" filter="url(#glow)">xenv</text>
 
   <!-- blinking cursor -->
-  <rect x="452" y="88" width="46" height="90" rx="4" fill="#FF2D9B">
+  <rect x="518" y="88" width="46" height="92" rx="4" fill="#FF12A6" filter="url(#glow)">
     <animate attributeName="opacity" values="1;1;0.08;0.08" keyTimes="0;0.5;0.5;1" dur="1.06s" repeatCount="indefinite"/>
   </rect>
 
   <!-- tagline -->
-  <text x="152" y="208" font-size="18" letter-spacing="0.5" fill="#7C8698">encrypted env · one file per key · POSIX</text>
+  <text x="178" y="210" font-size="18" letter-spacing="0.5" fill="#7C8698">encrypted env · one file per key · POSIX</text>
 </svg>
