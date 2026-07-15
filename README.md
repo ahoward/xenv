@@ -87,7 +87,7 @@ Or set a default env with `$XENV_ENV` and drop the token entirely (an explicit `
 ```
 export XENV_ENV=production
 xenv get API_KEY          # = xenv get @production API_KEY
-xenv run ./server         # = xenv run @production ./server
+xenv ./server             # = xenv @production ./server
 xenv --json               # dump the production env as JSON
 ```
 
