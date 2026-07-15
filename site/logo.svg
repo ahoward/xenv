@@ -13,7 +13,7 @@
   <text x="152" y="52" font-size="16" letter-spacing="1" fill="#3A2740">xenv:v4:&lt;salt&gt;:&lt;iter&gt;:&lt;iv&gt;:&lt;ct&gt;:&lt;mac&gt;</text>
 
   <!-- metal skull &amp; crossbones -->
-  <g transform="translate(44,54)" filter="url(#glow)">
+  <g transform="translate(40,72) scale(0.76)" filter="url(#glow)">
     <g fill="url(#neon)" stroke="url(#neon)" stroke-width="13" stroke-linejoin="miter" stroke-linecap="butt">
       <line x1="6" y1="26" x2="106" y2="124"/>
       <line x1="106" y1="26" x2="6" y2="124"/>
@@ -26,19 +26,19 @@
     <path d="M92 46 L60 62 L88 68 Z" fill="#0B0E14"/>
     <!-- sharp nose -->
     <path d="M50 66 L62 66 L56 90 Z" fill="#0B0E14"/>
-    <!-- fanged maw: dark mouth + sharp interlocking pink fangs -->
-    <path d="M32 90 L80 90 L76 112 L56 120 L36 112 Z" fill="#0B0E14"/>
-    <path d="M35 91 l7 0 -3.5 22 z M47 91 l7 0 -3.5 24 z M59 91 l7 0 -3.5 24 z M70 91 l6 0 -3 19 z" fill="url(#neon)"/>
-    <path d="M41 114 l6 0 -3 -17 z M53 117 l6 0 -3 -19 z M65 114 l6 0 -3 -17 z" fill="url(#neon)"/>
+    <!-- fanged maw: dark mouth + long needle-thin interlocking fangs -->
+    <path d="M30 88 L82 88 L78 112 L56 118 L34 112 Z" fill="#0B0E14"/>
+    <path d="M35 88 l3 0 -1.5 27 z M42 88 l3 0 -1.5 24 z M49 88 l3 0 -1.5 28 z M56 88 l3 0 -1.5 25 z M63 88 l3 0 -1.5 28 z M70 88 l3 0 -1.5 23 z" fill="url(#neon)"/>
+    <path d="M39 113 l3 0 -1.5 -23 z M47 115 l3 0 -1.5 -26 z M55 116 l3 0 -1.5 -27 z M63 115 l3 0 -1.5 -26 z M71 113 l3 0 -1.5 -22 z" fill="url(#neon)"/>
   </g>
 
   <!-- wordmark with metal umlaut -->
-  <text x="176" y="174" font-size="116" font-weight="800" letter-spacing="-2"
+  <text x="150" y="176" font-size="132" font-weight="800" letter-spacing="-3"
         fill="url(#neon)" stroke="url(#neon)" stroke-width="3.5" filter="url(#glow)">xenv</text>
-  <g fill="#FF12A6" filter="url(#glow)"><circle cx="266" cy="80" r="6"/><circle cx="282" cy="80" r="6"/></g>
+  <g fill="#FF12A6" filter="url(#glow)"><circle cx="266" cy="74" r="6.5"/><circle cx="282" cy="74" r="6.5"/></g>
 
   <!-- blinking cursor -->
-  <rect x="518" y="88" width="46" height="92" rx="4" fill="#FF12A6" filter="url(#glow)">
+  <rect x="508" y="84" width="46" height="98" rx="4" fill="#FF12A6" filter="url(#glow)">
     <animate attributeName="opacity" values="1;1;0.08;0.08" keyTimes="0;0.5;0.5;1" dur="1.06s" repeatCount="indefinite"/>
   </rect>
 
