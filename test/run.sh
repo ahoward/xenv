@@ -405,12 +405,34 @@ test_init_frontmatter_params() {
   grep -q "xenv/production" "$rf" || return 1
 }
 
-test_init_value_files_are_v3_envelopes() {
+test_init_value_files_are_v4_envelopes() {
+  # writes are v4 (self-contained: salt + iter embedded per value).
   xenv setup >/dev/null 2>&1
   case "$(cat xenv/envs/development/APP_ENV.value.enc)" in
-    "xenv:v3:"*) return 0 ;;
+    "xenv:v4:"*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+test_dual_read_v3_envelope() {
+  # the tool writes v4 now, but must still READ legacy v3 envelopes.
+  # Fixture: the demo HELLO=world v3 envelope from recipes/vectors, whose
+  # KDF salt/iter live in the env README frontmatter (the v3 model).
+  xenv setup >/dev/null 2>&1
+  mkdir -p xenv/envs/v3read
+  cat > xenv/envs/v3read/README.md <<'EOF'
+---
+version: v3
+iter: 200000
+salt: a44624d731763d901f5c57fd3ebc4493
+---
+EOF
+  printf 'xenv:v3:01b4aa67776b16862cdc6566748601f6:9bf3bacf3687fd87f61697ec2a2e0484:bf513e1a04b0bbe2145377aa1b757adb72f90270365b0fb9dce5b3d4cf6bbd3b\n' \
+    > xenv/envs/v3read/HELLO.value.enc
+  export XENV_KEY_V3READ='demo-key-for-recipes-NOT-FOR-REAL-USE'
+  out=$(xenv get @v3read HELLO)
+  unset XENV_KEY_V3READ
+  assert_eq "world" "$out" "tool dual-reads a v3 envelope"
 }
 
 test_init_bin_xenv_is_self_contained() {
@@ -889,13 +911,14 @@ test_env_var_beats_file_backend() {
 test_tampered_ciphertext_rejected() {
   xenv setup >/dev/null 2>&1
   orig=$(cat xenv/envs/production/APP_ENV.value.enc)
-  IFS=: read -r tag ver iv ct mac <<EOF
+  # v4 layout: xenv:v4:<salt>:<iter>:<iv>:<ct>:<mac>
+  IFS=: read -r tag ver salt iter iv ct mac <<EOF
 $orig
 EOF
   first=$(printf '%s' "$ct" | cut -c1)
   rest=$(printf '%s' "$ct" | cut -c2-)
   if [ "$first" = "f" ]; then mut="0$rest"; else mut="f$rest"; fi
-  printf 'xenv:v3:%s:%s:%s\n' "$iv" "$mut" "$mac" > xenv/envs/production/APP_ENV.value.enc
+  printf 'xenv:v4:%s:%s:%s:%s:%s\n' "$salt" "$iter" "$iv" "$mut" "$mac" > xenv/envs/production/APP_ENV.value.enc
 
   out=$(xenv get @production APP_ENV 2>&1) && return 1
   echo "$out" | grep -qi "MAC verification" || return 1
@@ -1144,7 +1167,8 @@ run_test "two same-basename projects → unique ids"  test_two_projects_same_bas
 run_test "weird basename gets sanitized"            test_basename_sanitization
 run_test "no xenv/README.md → key lookup fails"     test_no_top_readme_means_no_key_lookup
 run_test "init writes KDF params in README frontmatter"  test_init_frontmatter_params
-run_test "init value files are v3 envelopes"        test_init_value_files_are_v3_envelopes
+run_test "init value files are v4 envelopes"        test_init_value_files_are_v4_envelopes
+run_test "tool dual-reads a v3 envelope"            test_dual_read_v3_envelope
 run_test "init bin/xenv is self-contained"          test_init_bin_xenv_is_self_contained
 
 # set / get / list / unset
