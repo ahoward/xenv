@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="site/logo.svg" alt="xenv — encrypted env vars, one file per key" width="560">
+</p>
+
 # xenv
 
 ## NAME
