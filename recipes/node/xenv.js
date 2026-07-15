@@ -69,17 +69,33 @@ function readParams(envName) {
 
 function deriveKeys(pass, saltHex, iters) {
   const salt = Buffer.from(saltHex, 'hex');
-  const out = crypto.pbkdf2Sync(pass, salt, iters, 64, 'sha256');
+  const out = crypto.pbkdf2Sync(pass, salt, Number(iters), 64, 'sha256');
   return { encKey: out.subarray(0, 32), macKey: out.subarray(32, 64) };
 }
 
-function decryptEnvelope(envelope, encKey, macKey) {
+// Dual-read: v3 uses the caller's README-derived keys; v4 is
+// self-contained — salt/iter come from the envelope.
+function decryptEnvelope(envelope, passphrase, v3EncKey, v3MacKey) {
   const parts = envelope.trim().split(':');
-  if (parts.length !== 5) throw new Error('envelope: wrong field count');
-  const [tag, ver, ivHex, ctHex, macHex] = parts;
-  if (tag !== 'xenv' || ver !== VAULT_VERSION) {
-    throw new Error(`envelope: unsupported ${tag}:${ver}`);
+  if (parts[0] !== 'xenv') throw new Error('envelope: not xenv');
+
+  let encKey, macKey, ivHex, ctHex, macHex, macScope;
+  if (parts[1] === 'v3') {
+    if (parts.length !== 5) throw new Error('envelope: wrong field count');
+    [, , ivHex, ctHex, macHex] = parts;
+    encKey = v3EncKey;
+    macKey = v3MacKey;
+    macScope = `v3:${ivHex}:${ctHex}`;
+  } else if (parts[1] === 'v4') {
+    if (parts.length !== 7) throw new Error('envelope: wrong field count');
+    let saltHex, iter;
+    [, , saltHex, iter, ivHex, ctHex, macHex] = parts;
+    ({ encKey, macKey } = deriveKeys(passphrase, saltHex, iter));
+    macScope = `v4:${saltHex}:${iter}:${ivHex}:${ctHex}`;
+  } else {
+    throw new Error(`envelope: unsupported version ${parts[1]}`);
   }
+
   if (ivHex.length !== 32 || macHex.length !== 64) {
     throw new Error('envelope: wrong iv/mac length');
   }
@@ -91,7 +107,6 @@ function decryptEnvelope(envelope, encKey, macKey) {
   }
 
   // MAC verify FIRST (encrypt-then-MAC; constant-time compare)
-  const macScope = `${VAULT_VERSION}:${ivHex}:${ctHex}`;
   const expected = crypto
     .createHmac('sha256', macKey)
     .update(macScope, 'ascii')
@@ -135,10 +150,11 @@ function atomicWrite(dest, content) {
 
 function get(envName, key) {
   const { iter, salt } = readParams(envName);
-  const { encKey, macKey } = deriveKeys(passphrase(envName), salt, iter);
+  const pass = passphrase(envName);
+  const { encKey, macKey } = deriveKeys(pass, salt, iter);
   const file = path.join(root(), 'envs', envName, key + VALUE_EXT);
   if (!fs.existsSync(file)) throw new Error(`no such key: ${key}`);
-  return decryptEnvelope(fs.readFileSync(file, 'utf8'), encKey, macKey);
+  return decryptEnvelope(fs.readFileSync(file, 'utf8'), pass, encKey, macKey);
 }
 
 function set(envName, key, plaintext) {
@@ -153,14 +169,15 @@ function set(envName, key, plaintext) {
 
 function load(envName) {
   const { iter, salt } = readParams(envName);
-  const { encKey, macKey } = deriveKeys(passphrase(envName), salt, iter);
+  const pass = passphrase(envName);
+  const { encKey, macKey } = deriveKeys(pass, salt, iter);
   const envDir = path.join(root(), 'envs', envName);
   const out = {};
   for (const file of fs.readdirSync(envDir).sort()) {
     if (!file.endsWith(VALUE_EXT)) continue;
     const key = file.slice(0, -VALUE_EXT.length);
     const envelope = fs.readFileSync(path.join(envDir, file), 'utf8');
-    out[key] = decryptEnvelope(envelope, encKey, macKey);
+    out[key] = decryptEnvelope(envelope, pass, encKey, macKey);
   }
   return out;
 }

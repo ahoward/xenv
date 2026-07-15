@@ -83,13 +83,27 @@ def _derive_keys(passphrase: str, salt_hex: str, iters: int):
     return derived[:32], derived[32:]
 
 
-def _decrypt_envelope(envelope: str, enc_key: bytes, mac_key: bytes) -> bytes:
+def _decrypt_envelope(envelope: str, passphrase: str, v3_enc: bytes, v3_mac: bytes) -> bytes:
+    # Dual-read: v3 uses the caller's README-derived keys; v4 is
+    # self-contained — salt/iter come from the envelope.
     parts = envelope.strip().split(":")
-    if len(parts) != 5:
-        raise ValueError("envelope: wrong field count")
-    tag, ver, iv_hex, ct_hex, mac_hex = parts
-    if tag != "xenv" or ver != VAULT_VERSION:
-        raise ValueError(f"envelope: unsupported {tag}:{ver}")
+    if not parts or parts[0] != "xenv":
+        raise ValueError("envelope: not xenv")
+    ver = parts[1] if len(parts) > 1 else ""
+    if ver == "v3":
+        if len(parts) != 5:
+            raise ValueError("envelope: wrong field count")
+        _, _, iv_hex, ct_hex, mac_hex = parts
+        enc_key, mac_key = v3_enc, v3_mac
+        mac_scope = f"v3:{iv_hex}:{ct_hex}"
+    elif ver == "v4":
+        if len(parts) != 7:
+            raise ValueError("envelope: wrong field count")
+        _, _, salt_hex, it, iv_hex, ct_hex, mac_hex = parts
+        enc_key, mac_key = _derive_keys(passphrase, salt_hex, int(it))
+        mac_scope = f"v4:{salt_hex}:{it}:{iv_hex}:{ct_hex}"
+    else:
+        raise ValueError(f"envelope: unsupported version {ver}")
     if len(iv_hex) != 32 or len(mac_hex) != 64:
         raise ValueError("envelope: wrong iv/mac length")
     if not ct_hex or len(ct_hex) % 32 != 0:
@@ -98,8 +112,7 @@ def _decrypt_envelope(envelope: str, enc_key: bytes, mac_key: bytes) -> bytes:
         raise ValueError("envelope: non-hex content")
 
     # MAC verify FIRST (encrypt-then-MAC; constant-time compare)
-    mac_scope = f"{VAULT_VERSION}:{iv_hex}:{ct_hex}".encode("ascii")
-    expected = hmac.new(mac_key, mac_scope, hashlib.sha256).hexdigest()
+    expected = hmac.new(mac_key, mac_scope.encode("ascii"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, mac_hex):
         raise ValueError("MAC verification failed — wrong key or tampered vault")
 
@@ -143,11 +156,12 @@ def _atomic_write(path: Path, content: str):
 def get(env_name: str, key: str) -> bytes:
     """Decrypt and return the plaintext bytes for one key."""
     iters, salt = _read_params(env_name)
-    enc_key, mac_key = _derive_keys(_passphrase(env_name), salt, iters)
+    pw = _passphrase(env_name)
+    v3_enc, v3_mac = _derive_keys(pw, salt, iters)
     f = _root() / "envs" / env_name / (key + VALUE_EXT)
     if not f.is_file():
         raise FileNotFoundError(f"no such key: {key}")
-    return _decrypt_envelope(f.read_text(), enc_key, mac_key)
+    return _decrypt_envelope(f.read_text(), pw, v3_enc, v3_mac)
 
 
 def set(env_name: str, key: str, plaintext: bytes):
@@ -167,14 +181,15 @@ def set(env_name: str, key: str, plaintext: bytes):
 def load(env_name: str) -> dict:
     """Return {KEY: plaintext-bytes} for every value in the named env."""
     iters, salt = _read_params(env_name)
-    enc_key, mac_key = _derive_keys(_passphrase(env_name), salt, iters)
+    pw = _passphrase(env_name)
+    v3_enc, v3_mac = _derive_keys(pw, salt, iters)
     env_dir = _root() / "envs" / env_name
     out = {}
     for f in sorted(env_dir.iterdir()):
         if not f.name.endswith(VALUE_EXT):
             continue
         key = f.name[: -len(VALUE_EXT)]
-        out[key] = _decrypt_envelope(f.read_text(), enc_key, mac_key)
+        out[key] = _decrypt_envelope(f.read_text(), pw, v3_enc, v3_mac)
     return out
 
 

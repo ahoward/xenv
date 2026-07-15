@@ -64,6 +64,13 @@ exercise() {
   }
   assert "$name get DATABASE_URL" "postgres://localhost/demo" "$out"
 
+  # ── get a v4 (self-contained) value — proves the loader dual-reads
+  out=$("$@" get production V4_DEMO 2>&1) || {
+    red "  FAIL  $name get V4_DEMO (v4) errored: $out"
+    FAIL=$((FAIL + 1)); return
+  }
+  assert "$name get V4_DEMO (v4 dual-read)" "v4-self-contained" "$out"
+
   # ── load produces all four known keys
   all=$("$@" load production 2>&1) || {
     red "  FAIL  $name load errored: $all"

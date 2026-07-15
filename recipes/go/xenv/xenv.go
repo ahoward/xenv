@@ -115,15 +115,43 @@ func deriveKeys(pass, saltHex string, iter int) (encKey, macKey []byte, err erro
 	return derived[:32], derived[32:], nil
 }
 
-func decryptEnvelope(envelope string, encKey, macKey []byte) ([]byte, error) {
+// Dual-read: v3 uses the caller's README-derived keys; v4 is
+// self-contained — salt/iter come from the envelope.
+func decryptEnvelope(envelope, passphrase string, v3Enc, v3Mac []byte) ([]byte, error) {
 	parts := strings.Split(strings.TrimSpace(envelope), ":")
-	if len(parts) != 5 {
-		return nil, errors.New("envelope: wrong field count")
+	if len(parts) < 2 || parts[0] != "xenv" {
+		return nil, errors.New("envelope: not xenv")
 	}
-	tag, ver, ivHex, ctHex, macHex := parts[0], parts[1], parts[2], parts[3], parts[4]
-	if tag != "xenv" || ver != vaultVersion {
-		return nil, fmt.Errorf("envelope: unsupported %s:%s", tag, ver)
+
+	var encKey, macKey []byte
+	var ivHex, ctHex, macHex, macScope string
+	switch parts[1] {
+	case "v3":
+		if len(parts) != 5 {
+			return nil, errors.New("envelope: wrong field count")
+		}
+		ivHex, ctHex, macHex = parts[2], parts[3], parts[4]
+		encKey, macKey = v3Enc, v3Mac
+		macScope = fmt.Sprintf("v3:%s:%s", ivHex, ctHex)
+	case "v4":
+		if len(parts) != 7 {
+			return nil, errors.New("envelope: wrong field count")
+		}
+		saltHex, iterStr := parts[2], parts[3]
+		ivHex, ctHex, macHex = parts[4], parts[5], parts[6]
+		iter, err := strconv.Atoi(iterStr)
+		if err != nil {
+			return nil, errors.New("envelope: bad iter")
+		}
+		encKey, macKey, err = deriveKeys(passphrase, saltHex, iter)
+		if err != nil {
+			return nil, err
+		}
+		macScope = fmt.Sprintf("v4:%s:%s:%s:%s", saltHex, iterStr, ivHex, ctHex)
+	default:
+		return nil, fmt.Errorf("envelope: unsupported version %s", parts[1])
 	}
+
 	if len(ivHex) != 32 || len(macHex) != 64 {
 		return nil, errors.New("envelope: wrong iv/mac length")
 	}
@@ -144,7 +172,6 @@ func decryptEnvelope(envelope string, encKey, macKey []byte) ([]byte, error) {
 	}
 
 	// MAC verify FIRST (encrypt-then-MAC; constant-time compare)
-	macScope := fmt.Sprintf("%s:%s:%s", vaultVersion, ivHex, ctHex)
 	h := hmac.New(sha256.New, macKey)
 	h.Write([]byte(macScope))
 	expected := h.Sum(nil)
@@ -239,7 +266,7 @@ func Get(envName, key string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("no such key: %s", key)
 	}
-	return decryptEnvelope(string(data), encKey, macKey)
+	return decryptEnvelope(string(data), pass, encKey, macKey)
 }
 
 // Set encrypts plaintext and atomically writes it.
@@ -297,7 +324,7 @@ func Load(envName string) (map[string][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		plain, err := decryptEnvelope(string(data), encKey, macKey)
+		plain, err := decryptEnvelope(string(data), pass, encKey, macKey)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}

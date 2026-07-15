@@ -112,18 +112,40 @@ static class Xenv
 
     static string HexLower(byte[] b) => Convert.ToHexString(b).ToLowerInvariant();
 
-    static byte[] DecryptEnvelope(string envelope, byte[] encKey, byte[] macKey)
+    // Dual-read: v3 uses the caller's README-derived keys; v4 is
+    // self-contained — salt/iter come from the envelope.
+    static byte[] DecryptEnvelope(string envelope, string passphrase, byte[] v3Enc, byte[] v3Mac)
     {
         var parts = envelope.Trim().Split(':');
-        if (parts.Length != 5) throw new Exception("envelope: wrong field count");
-        string tag = parts[0], ver = parts[1], ivHex = parts[2], ctHex = parts[3], macHex = parts[4];
-        if (tag != "xenv" || ver != VaultVersion) throw new Exception($"envelope: unsupported {tag}:{ver}");
+        if (parts.Length < 2 || parts[0] != "xenv") throw new Exception("envelope: not xenv");
+
+        byte[] encKey, macKey;
+        string ivHex, ctHex, macHex, macScope;
+        if (parts[1] == "v3")
+        {
+            if (parts.Length != 5) throw new Exception("envelope: wrong field count");
+            ivHex = parts[2]; ctHex = parts[3]; macHex = parts[4];
+            encKey = v3Enc; macKey = v3Mac;
+            macScope = $"v3:{ivHex}:{ctHex}";
+        }
+        else if (parts[1] == "v4")
+        {
+            if (parts.Length != 7) throw new Exception("envelope: wrong field count");
+            string saltHex = parts[2], iterStr = parts[3];
+            ivHex = parts[4]; ctHex = parts[5]; macHex = parts[6];
+            (encKey, macKey) = DeriveKeys(passphrase, saltHex, int.Parse(iterStr));
+            macScope = $"v4:{saltHex}:{iterStr}:{ivHex}:{ctHex}";
+        }
+        else
+        {
+            throw new Exception($"envelope: unsupported version {parts[1]}");
+        }
+
         if (ivHex.Length != 32 || macHex.Length != 64) throw new Exception("envelope: wrong iv/mac length");
         if (ctHex.Length == 0 || ctHex.Length % 32 != 0) throw new Exception("envelope: ct not block-aligned");
         if (!Regex.IsMatch(ivHex + ctHex + macHex, "^[0-9a-f]+$")) throw new Exception("envelope: non-hex content");
 
         // MAC verify FIRST (encrypt-then-MAC; constant-time compare).
-        var macScope = $"{VaultVersion}:{ivHex}:{ctHex}";
         var expected = HMACSHA256.HashData(macKey, Encoding.ASCII.GetBytes(macScope));
         var provided = Convert.FromHexString(macHex);
         if (!CryptographicOperations.FixedTimeEquals(expected, provided))
@@ -151,10 +173,11 @@ static class Xenv
     public static byte[] Get(string env, string key)
     {
         var (iter, salt) = ReadParams(env);
-        var (enc, mac) = DeriveKeys(Passphrase(env), salt, iter);
+        var pass = Passphrase(env);
+        var (enc, mac) = DeriveKeys(pass, salt, iter);
         var file = Path.Combine(Root(), "envs", env, key + ValueExt);
         if (!File.Exists(file)) throw new Exception($"no such key: {key}");
-        return DecryptEnvelope(File.ReadAllText(file), enc, mac);
+        return DecryptEnvelope(File.ReadAllText(file), pass, enc, mac);
     }
 
     public static void Set(string env, string key, byte[] plaintext)
@@ -172,7 +195,8 @@ static class Xenv
     public static List<(string Key, byte[] Value)> Load(string env)
     {
         var (iter, salt) = ReadParams(env);
-        var (enc, mac) = DeriveKeys(Passphrase(env), salt, iter);
+        var pass = Passphrase(env);
+        var (enc, mac) = DeriveKeys(pass, salt, iter);
         var dir = Path.Combine(Root(), "envs", env);
         var res = new List<(string, byte[])>();
         foreach (var path in Directory.GetFiles(dir).OrderBy(p => Path.GetFileName(p), StringComparer.Ordinal))
@@ -180,7 +204,7 @@ static class Xenv
             var name = Path.GetFileName(path);
             if (!name.EndsWith(ValueExt)) continue;
             var key = name[..^ValueExt.Length];
-            res.Add((key, DecryptEnvelope(File.ReadAllText(path), enc, mac)));
+            res.Add((key, DecryptEnvelope(File.ReadAllText(path), pass, enc, mac)));
         }
         return res;
     }

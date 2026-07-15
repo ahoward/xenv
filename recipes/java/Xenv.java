@@ -122,13 +122,30 @@ public class Xenv {
     return new byte[][] { Arrays.copyOfRange(out, 0, 32), Arrays.copyOfRange(out, 32, 64) };
   }
 
-  static byte[] decryptEnvelope(String envelope, byte[] encKey, byte[] macKey) throws Exception {
+  // Dual-read: v3 uses the caller's README-derived keys; v4 is
+  // self-contained — salt/iter come from the envelope.
+  static byte[] decryptEnvelope(String envelope, String passphrase, byte[] v3Enc, byte[] v3Mac) throws Exception {
     String[] parts = envelope.strip().split(":", -1);
-    if (parts.length != 5) throw new RuntimeException("envelope: wrong field count");
-    String tag = parts[0], ver = parts[1], ivHex = parts[2], ctHex = parts[3], macHex = parts[4];
-    if (!tag.equals("xenv") || !ver.equals(VAULT_VERSION)) {
-      throw new RuntimeException("envelope: unsupported " + tag + ":" + ver);
+    if (parts.length < 2 || !parts[0].equals("xenv")) throw new RuntimeException("envelope: not xenv");
+
+    byte[] encKey, macKey;
+    String ivHex, ctHex, macHex, macScope;
+    if (parts[1].equals("v3")) {
+      if (parts.length != 5) throw new RuntimeException("envelope: wrong field count");
+      ivHex = parts[2]; ctHex = parts[3]; macHex = parts[4];
+      encKey = v3Enc; macKey = v3Mac;
+      macScope = "v3:" + ivHex + ":" + ctHex;
+    } else if (parts[1].equals("v4")) {
+      if (parts.length != 7) throw new RuntimeException("envelope: wrong field count");
+      String saltHex = parts[2], iterStr = parts[3];
+      ivHex = parts[4]; ctHex = parts[5]; macHex = parts[6];
+      byte[][] k = deriveKeys(passphrase, saltHex, Integer.parseInt(iterStr));
+      encKey = k[0]; macKey = k[1];
+      macScope = "v4:" + saltHex + ":" + iterStr + ":" + ivHex + ":" + ctHex;
+    } else {
+      throw new RuntimeException("envelope: unsupported version " + parts[1]);
     }
+
     if (ivHex.length() != 32 || macHex.length() != 64) {
       throw new RuntimeException("envelope: wrong iv/mac length");
     }
@@ -140,7 +157,6 @@ public class Xenv {
     }
 
     // MAC verify FIRST (encrypt-then-MAC; constant-time compare).
-    String macScope = VAULT_VERSION + ":" + ivHex + ":" + ctHex;
     byte[] expected = hmac(macKey).doFinal(macScope.getBytes(StandardCharsets.US_ASCII));
     byte[] provided = hexDecode(macHex);
     if (!MessageDigest.isEqual(expected, provided)) {
@@ -168,10 +184,11 @@ public class Xenv {
 
   static byte[] get(String env, String key) throws Exception {
     Map<String, String> p = readParams(env);
-    byte[][] keys = deriveKeys(passphrase(env), p.get("salt"), Integer.parseInt(p.get("iter")));
+    String pass = passphrase(env);
+    byte[][] keys = deriveKeys(pass, p.get("salt"), Integer.parseInt(p.get("iter")));
     Path file = Path.of(root(), "envs", env, key + VALUE_EXT);
     if (!Files.isRegularFile(file)) throw new RuntimeException("no such key: " + key);
-    return decryptEnvelope(new String(Files.readAllBytes(file), StandardCharsets.US_ASCII), keys[0], keys[1]);
+    return decryptEnvelope(new String(Files.readAllBytes(file), StandardCharsets.US_ASCII), pass, keys[0], keys[1]);
   }
 
   static void set(String env, String key, byte[] plaintext) throws Exception {
@@ -188,7 +205,8 @@ public class Xenv {
 
   static List<String[]> load(String env) throws Exception {
     Map<String, String> p = readParams(env);
-    byte[][] keys = deriveKeys(passphrase(env), p.get("salt"), Integer.parseInt(p.get("iter")));
+    String pass = passphrase(env);
+    byte[][] keys = deriveKeys(pass, p.get("salt"), Integer.parseInt(p.get("iter")));
     Path dir = Path.of(root(), "envs", env);
     List<String[]> names = new ArrayList<>();
     try (var stream = Files.list(dir)) {
@@ -199,7 +217,7 @@ public class Xenv {
     }
     List<String[]> out = new ArrayList<>();
     for (String[] n : names) {
-      byte[] pt = decryptEnvelope(new String(Files.readAllBytes(Path.of(n[1])), StandardCharsets.US_ASCII), keys[0], keys[1]);
+      byte[] pt = decryptEnvelope(new String(Files.readAllBytes(Path.of(n[1])), StandardCharsets.US_ASCII), pass, keys[0], keys[1]);
       out.add(new String[] { n[0], new String(pt, StandardCharsets.UTF_8) });
     }
     return out;

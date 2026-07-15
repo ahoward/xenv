@@ -146,19 +146,35 @@ function xenv_load(string $envName): array
 
 // --- Cryptography & File Helpers ---
 
-function decrypt_value(string $envelope, string $passphrase, string $salt, int $iter): string
+function decrypt_value(string $envelope, string $passphrase, string $v3Salt, int $v3Iter): string
 {
-    // 1. Parse envelope
-    $parts = explode(':', $envelope);
-    if (count($parts) !== 5) {
-        throw new Exception("Malformed envelope: expected 5 parts, found " . count($parts));
+    // Dual-read: v3 uses the caller's README-derived salt/iter; v4 is
+    // self-contained — salt/iter come from the envelope.
+    $parts = explode(':', trim($envelope));
+    if (($parts[0] ?? '') !== 'xenv') {
+        throw new Exception("Malformed envelope: not xenv");
     }
-    list($tag, $version, $ivHex, $ctHex, $macHex) = $parts;
+    $version = $parts[1] ?? '';
+    if ($version === 'v3') {
+        if (count($parts) !== 5) {
+            throw new Exception("Malformed envelope: expected 5 parts, found " . count($parts));
+        }
+        list(, , $ivHex, $ctHex, $macHex) = $parts;
+        $salt = $v3Salt;
+        $iter = $v3Iter;
+        $macData = "v3:{$ivHex}:{$ctHex}";
+    } elseif ($version === 'v4') {
+        if (count($parts) !== 7) {
+            throw new Exception("Malformed envelope: expected 7 parts, found " . count($parts));
+        }
+        list(, , $saltHex, $iterStr, $ivHex, $ctHex, $macHex) = $parts;
+        $salt = $saltHex;
+        $iter = (int)$iterStr;
+        $macData = "v4:{$saltHex}:{$iterStr}:{$ivHex}:{$ctHex}";
+    } else {
+        throw new Exception("Unsupported envelope version: '$version'");
+    }
 
-    // 2. Validate fields
-    if ($tag !== 'xenv' || $version !== 'v3') {
-        throw new Exception("Unsupported envelope format: expected 'xenv:v3', got '$tag:$version'");
-    }
     if (strlen($ivHex) !== 32) {
         throw new Exception("Invalid IV length: expected 32 hex chars, got " . strlen($ivHex));
     }
@@ -169,11 +185,10 @@ function decrypt_value(string $envelope, string $passphrase, string $salt, int $
         throw new Exception("Invalid MAC length: expected 64 hex chars, got " . strlen($macHex));
     }
 
-    // 3. Derive keys
+    // Derive keys
     list($encKey, $macKey) = derive_keys($passphrase, $salt, $iter);
 
-    // 4. Verify MAC (BEFORE decrypting)
-    $macData = "v3:{$ivHex}:{$ctHex}";
+    // Verify MAC (BEFORE decrypting)
     $expectedMac = hash_hmac('sha256', $macData, $macKey, true);
     $envelopeMac = hex2bin($macHex);
 

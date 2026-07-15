@@ -186,22 +186,68 @@ fn derive_keys(pass: &str, salt: &[u8], iter: u32) -> ([u8; 32], [u8; 32]) {
     (enc, mac)
 }
 
+// Dual-read: v3 uses the caller's README-derived keys; v4 is
+// self-contained — salt/iter come from the envelope.
 fn decrypt_envelope(
     envelope: &str,
-    enc_key: &[u8; 32],
-    mac_key: &[u8; 32],
+    passphrase: &str,
+    v3_enc: &[u8; 32],
+    v3_mac: &[u8; 32],
 ) -> Result<Vec<u8>, Error> {
     let parts: Vec<&str> = envelope.trim().split(':').collect();
-    if parts.len() != 5 {
-        return Err(Error::Format("envelope: wrong field count".into()));
+    if parts.len() < 2 || parts[0] != "xenv" {
+        return Err(Error::Format("envelope: not xenv".into()));
     }
-    let (tag, ver, iv_hex, ct_hex, mac_hex) =
-        (parts[0], parts[1], parts[2], parts[3], parts[4]);
-    if tag != "xenv" || ver != VAULT_VERSION {
-        return Err(Error::Format(format!(
-            "envelope: unsupported {tag}:{ver}"
-        )));
-    }
+
+    #[allow(clippy::type_complexity)]
+    let (enc_key, mac_key, iv_hex, ct_hex, mac_hex, mac_scope): (
+        [u8; 32],
+        [u8; 32],
+        &str,
+        &str,
+        &str,
+        String,
+    ) = match parts[1] {
+        "v3" => {
+            if parts.len() != 5 {
+                return Err(Error::Format("envelope: wrong field count".into()));
+            }
+            (
+                *v3_enc,
+                *v3_mac,
+                parts[2],
+                parts[3],
+                parts[4],
+                format!("v3:{}:{}", parts[2], parts[3]),
+            )
+        }
+        "v4" => {
+            if parts.len() != 7 {
+                return Err(Error::Format("envelope: wrong field count".into()));
+            }
+            let salt_hex = parts[2];
+            let iter: u32 = parts[3]
+                .parse()
+                .map_err(|_| Error::Format("envelope: bad iter".into()))?;
+            let salt =
+                hex_decode(salt_hex).ok_or_else(|| Error::Format("non-hex salt".into()))?;
+            let (e, m) = derive_keys(passphrase, &salt, iter);
+            (
+                e,
+                m,
+                parts[4],
+                parts[5],
+                parts[6],
+                format!("v4:{}:{}:{}:{}", salt_hex, parts[3], parts[4], parts[5]),
+            )
+        }
+        other => {
+            return Err(Error::Format(format!(
+                "envelope: unsupported version {other}"
+            )))
+        }
+    };
+
     if iv_hex.len() != 32 || mac_hex.len() != 64 {
         return Err(Error::Format("envelope: wrong iv/mac length".into()));
     }
@@ -215,8 +261,7 @@ fn decrypt_envelope(
         hex_decode(mac_hex).ok_or_else(|| Error::Format("non-hex mac".into()))?;
 
     // MAC verify FIRST (encrypt-then-MAC; HMAC's verify is constant-time).
-    let mac_scope = format!("{VAULT_VERSION}:{iv_hex}:{ct_hex}");
-    let mut hmac = <HmacSha256 as Mac>::new_from_slice(mac_key)
+    let mut hmac = <HmacSha256 as Mac>::new_from_slice(&mac_key)
         .map_err(|e| Error::Crypto(e.to_string()))?;
     hmac.update(mac_scope.as_bytes());
     hmac.verify_slice(&provided_mac).map_err(|_| Error::Mac)?;
@@ -226,7 +271,7 @@ fn decrypt_envelope(
         .as_slice()
         .try_into()
         .map_err(|_| Error::Format("iv not 16 bytes".into()))?;
-    let cipher = Aes256CbcDec::new(enc_key.into(), &iv_arr.into());
+    let cipher = Aes256CbcDec::new((&enc_key).into(), &iv_arr.into());
     let mut buf = ct.clone();
     let plain = cipher
         .decrypt_padded_mut::<Pkcs7>(&mut buf)
@@ -281,7 +326,8 @@ fn atomic_write(dest: &Path, content: &str) -> Result<(), Error> {
 /// Decrypt and return the plaintext bytes for one key.
 pub fn get(env_name: &str, key: &str) -> Result<Vec<u8>, Error> {
     let p = read_params(env_name)?;
-    let (enc_key, mac_key) = derive_keys(&passphrase(env_name)?, &p.salt, p.iter);
+    let pass = passphrase(env_name)?;
+    let (enc_key, mac_key) = derive_keys(&pass, &p.salt, p.iter);
 
     let file = root()
         .join("envs")
@@ -291,7 +337,7 @@ pub fn get(env_name: &str, key: &str) -> Result<Vec<u8>, Error> {
         return Err(Error::NotFound(format!("no such key: {key}")));
     }
     let envelope = fs::read_to_string(&file)?;
-    decrypt_envelope(&envelope, &enc_key, &mac_key)
+    decrypt_envelope(&envelope, &pass, &enc_key, &mac_key)
 }
 
 /// Encrypt plaintext and atomically write it.
@@ -314,7 +360,8 @@ pub fn set(env_name: &str, key: &str, plaintext: &[u8]) -> Result<(), Error> {
 /// Return a map of every variable in the named env to its decrypted bytes.
 pub fn load(env_name: &str) -> Result<BTreeMap<String, Vec<u8>>, Error> {
     let p = read_params(env_name)?;
-    let (enc_key, mac_key) = derive_keys(&passphrase(env_name)?, &p.salt, p.iter);
+    let pass = passphrase(env_name)?;
+    let (enc_key, mac_key) = derive_keys(&pass, &p.salt, p.iter);
 
     let env_dir = root().join("envs").join(env_name);
     let mut out = BTreeMap::new();
@@ -326,7 +373,7 @@ pub fn load(env_name: &str) -> Result<BTreeMap<String, Vec<u8>>, Error> {
         }
         let key = name[..name.len() - VALUE_EXT.len()].to_string();
         let envelope = fs::read_to_string(entry.path())?;
-        out.insert(key, decrypt_envelope(&envelope, &enc_key, &mac_key)?);
+        out.insert(key, decrypt_envelope(&envelope, &pass, &enc_key, &mac_key)?);
     }
     Ok(out)
 }

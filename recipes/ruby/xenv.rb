@@ -83,18 +83,32 @@ module Xenv
     [out[0, 32], out[32, 32]]
   end
 
-  def decrypt_envelope(envelope, enc_key, mac_key)
+  # Dual-read: v3 uses the caller's README-derived keys; v4 is
+  # self-contained — salt/iter come from the envelope.
+  def decrypt_envelope(envelope, passphrase, v3_enc, v3_mac)
     parts = envelope.strip.split(':')
-    raise 'envelope: wrong field count' unless parts.length == 5
+    raise 'envelope: not xenv' unless parts[0] == 'xenv'
 
-    tag, ver, iv_hex, ct_hex, mac_hex = parts
-    raise "envelope: unsupported #{tag}:#{ver}" unless tag == 'xenv' && ver == VAULT_VERSION
+    case parts[1]
+    when 'v3'
+      raise 'envelope: wrong field count' unless parts.length == 5
+      _, _, iv_hex, ct_hex, mac_hex = parts
+      enc_key, mac_key = v3_enc, v3_mac
+      mac_scope = "v3:#{iv_hex}:#{ct_hex}"
+    when 'v4'
+      raise 'envelope: wrong field count' unless parts.length == 7
+      _, _, salt_hex, iter, iv_hex, ct_hex, mac_hex = parts
+      enc_key, mac_key = derive_keys(passphrase, salt_hex, iter.to_i)
+      mac_scope = "v4:#{salt_hex}:#{iter}:#{iv_hex}:#{ct_hex}"
+    else
+      raise "envelope: unsupported version #{parts[1]}"
+    end
+
     raise 'envelope: wrong iv/mac length' unless iv_hex.length == 32 && mac_hex.length == 64
     raise 'envelope: ct not block-aligned' if ct_hex.empty? || (ct_hex.length % 32 != 0)
     raise 'envelope: non-hex content' unless (iv_hex + ct_hex + mac_hex).match?(/\A[0-9a-f]+\z/)
 
     # MAC verify FIRST (encrypt-then-MAC; constant-time compare).
-    mac_scope = "#{VAULT_VERSION}:#{iv_hex}:#{ct_hex}"
     expected  = OpenSSL::HMAC.digest('SHA256', mac_key, mac_scope)
     provided  = [mac_hex].pack('H*')
     unless expected.bytesize == provided.bytesize &&
@@ -133,11 +147,12 @@ module Xenv
 
   def get(env_name, key)
     iter, salt = read_params(env_name)
-    enc_key, mac_key = derive_keys(passphrase(env_name), salt, iter)
+    pass = passphrase(env_name)
+    v3_enc, v3_mac = derive_keys(pass, salt, iter)
     file = File.join(root, 'envs', env_name, key + VALUE_EXT)
     raise "no such key: #{key}" unless File.file?(file)
 
-    decrypt_envelope(File.binread(file), enc_key, mac_key)
+    decrypt_envelope(File.binread(file), pass, v3_enc, v3_mac)
   end
 
   def set(env_name, key, plaintext)
@@ -153,14 +168,15 @@ module Xenv
 
   def load(env_name)
     iter, salt = read_params(env_name)
-    enc_key, mac_key = derive_keys(passphrase(env_name), salt, iter)
+    pass = passphrase(env_name)
+    v3_enc, v3_mac = derive_keys(pass, salt, iter)
     env_dir = File.join(root, 'envs', env_name)
     out = {}
     Dir.children(env_dir).sort.each do |file|
       next unless file.end_with?(VALUE_EXT)
 
       key = file[0...-VALUE_EXT.length]
-      out[key] = decrypt_envelope(File.binread(File.join(env_dir, file)), enc_key, mac_key)
+      out[key] = decrypt_envelope(File.binread(File.join(env_dir, file)), pass, v3_enc, v3_mac)
     end
     out
   end

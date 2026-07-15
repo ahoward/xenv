@@ -92,12 +92,29 @@ defmodule Xenv do
     {enc, mac}
   end
 
-  def decrypt_envelope(envelope, enc_key, mac_key) do
+  # Dual-read: v3 uses the caller's README-derived keys; v4 is
+  # self-contained — salt/iter come from the envelope.
+  def decrypt_envelope(envelope, passphrase, v3_enc, v3_mac) do
     parts = envelope |> String.trim() |> String.split(":")
-    unless length(parts) == 5, do: raise("envelope: wrong field count")
-    [tag, ver, iv_hex, ct_hex, mac_hex] = parts
+    unless List.first(parts) == "xenv", do: raise("envelope: not xenv")
 
-    unless tag == "xenv" and ver == @vault_version, do: raise("envelope: unsupported #{tag}:#{ver}")
+    {enc_key, mac_key, iv_hex, ct_hex, mac_hex, mac_scope} =
+      case Enum.at(parts, 1) do
+        "v3" ->
+          unless length(parts) == 5, do: raise("envelope: wrong field count")
+          [_, _, iv, ct, mac] = parts
+          {v3_enc, v3_mac, iv, ct, mac, "v3:#{iv}:#{ct}"}
+
+        "v4" ->
+          unless length(parts) == 7, do: raise("envelope: wrong field count")
+          [_, _, salt, it, iv, ct, mac] = parts
+          {e, m} = derive_keys(passphrase, salt, String.to_integer(it))
+          {e, m, iv, ct, mac, "v4:#{salt}:#{it}:#{iv}:#{ct}"}
+
+        other ->
+          raise("envelope: unsupported version #{other}")
+      end
+
     unless String.length(iv_hex) == 32 and String.length(mac_hex) == 64,
       do: raise("envelope: wrong iv/mac length")
     unless ct_hex != "" and rem(String.length(ct_hex), 32) == 0,
@@ -106,7 +123,6 @@ defmodule Xenv do
       do: raise("envelope: non-hex content")
 
     # MAC verify FIRST (encrypt-then-MAC; constant-time compare).
-    mac_scope = "#{@vault_version}:#{iv_hex}:#{ct_hex}"
     expected = :crypto.mac(:hmac, :sha256, mac_key, mac_scope)
     provided = Base.decode16!(mac_hex, case: :lower)
     unless secure_compare(expected, provided),
@@ -151,10 +167,11 @@ defmodule Xenv do
 
   def get(env, key) do
     {iter, salt} = read_params(env)
-    {enc, mac} = derive_keys(passphrase(env), salt, iter)
+    pass = passphrase(env)
+    {enc, mac} = derive_keys(pass, salt, iter)
     file = Path.join([root(), "envs", env, key <> @value_ext])
     unless File.exists?(file), do: raise("no such key: #{key}")
-    decrypt_envelope(File.read!(file), enc, mac)
+    decrypt_envelope(File.read!(file), pass, enc, mac)
   end
 
   def set(env, key, plaintext) do
@@ -171,7 +188,8 @@ defmodule Xenv do
 
   def load(env) do
     {iter, salt} = read_params(env)
-    {enc, mac} = derive_keys(passphrase(env), salt, iter)
+    pass = passphrase(env)
+    {enc, mac} = derive_keys(pass, salt, iter)
     dir = Path.join([root(), "envs", env])
 
     dir
@@ -180,7 +198,7 @@ defmodule Xenv do
     |> Enum.filter(&String.ends_with?(&1, @value_ext))
     |> Enum.map(fn f ->
       key = String.slice(f, 0, String.length(f) - String.length(@value_ext))
-      {key, decrypt_envelope(File.read!(Path.join(dir, f)), enc, mac)}
+      {key, decrypt_envelope(File.read!(Path.join(dir, f)), pass, enc, mac)}
     end)
   end
 end
