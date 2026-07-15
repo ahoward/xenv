@@ -1,26 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 240" width="660" height="240" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-label="xenv — encrypted env, one file per key">
-  <!-- terminal card -->
-  <rect x="6" y="6" width="648" height="228" rx="26" fill="#0B0E14" stroke="#2A2F3A" stroke-width="2"/>
+  <!-- pink card -->
+  <rect x="6" y="6" width="648" height="228" rx="26" fill="#FF2D9B"/>
 
-  <!-- wire format, as faint texture -->
-  <text x="150" y="54" font-size="16" letter-spacing="1" fill="#333B49">xenv:v4:&lt;salt&gt;:&lt;iter&gt;:&lt;iv&gt;:&lt;ct&gt;:&lt;mac&gt;</text>
+  <!-- wire format, faint -->
+  <text x="150" y="54" font-size="16" letter-spacing="1" fill="#0B0E14" fill-opacity="0.22">xenv:v4:&lt;salt&gt;:&lt;iter&gt;:&lt;iv&gt;:&lt;ct&gt;:&lt;mac&gt;</text>
 
-  <!-- padlock (flat hot pink) -->
+  <!-- padlock (dark on pink) -->
   <g transform="translate(56,78)">
-    <path d="M20 34 V22 a24 24 0 0 1 48 0 V34" fill="none" stroke="#FF2D9B" stroke-width="12" stroke-linecap="round"/>
-    <rect x="6" y="34" width="76" height="64" rx="14" fill="#FF2D9B"/>
-    <circle cx="44" cy="60" r="9" fill="#0B0E14"/>
-    <rect x="39" y="60" width="10" height="22" rx="5" fill="#0B0E14"/>
+    <path d="M20 34 V22 a24 24 0 0 1 48 0 V34" fill="none" stroke="#0B0E14" stroke-width="12" stroke-linecap="round"/>
+    <rect x="6" y="34" width="76" height="64" rx="14" fill="#0B0E14"/>
+    <circle cx="44" cy="60" r="9" fill="#FF2D9B"/>
+    <rect x="39" y="60" width="10" height="22" rx="5" fill="#FF2D9B"/>
   </g>
 
   <!-- wordmark -->
-  <text x="150" y="172" font-size="112" font-weight="800" letter-spacing="-2" fill="#FF2D9B">xenv</text>
+  <text x="150" y="172" font-size="112" font-weight="800" letter-spacing="-2" fill="#0B0E14">xenv</text>
 
   <!-- blinking cursor -->
-  <rect x="452" y="88" width="46" height="90" rx="4" fill="#FF2D9B">
+  <rect x="452" y="88" width="46" height="90" rx="4" fill="#0B0E14">
     <animate attributeName="opacity" values="1;1;0.08;0.08" keyTimes="0;0.5;0.5;1" dur="1.06s" repeatCount="indefinite"/>
   </rect>
 
   <!-- tagline -->
-  <text x="152" y="208" font-size="18" letter-spacing="0.5" fill="#7C8698">encrypted env · one file per key · POSIX</text>
+  <text x="152" y="208" font-size="18" letter-spacing="0.5" fill="#0B0E14" fill-opacity="0.62">encrypted env · one file per key · POSIX</text>
 </svg>
