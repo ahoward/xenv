@@ -1,46 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 240" width="680" height="240" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" role="img" aria-label="xenv — encrypted env, one file per key">
-  <defs>
-    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#FF12A6"/><stop offset="1" stop-color="#FF6ED8"/>
-    </linearGradient>
-    <filter id="glow" x="-45%" y="-45%" width="190%" height="190%">
-      <feGaussianBlur stdDeviation="4" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 236" width="680" height="236" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" role="img" aria-label="xenv — encrypted env, one file per key">
+  <rect x="1.5" y="1.5" width="677" height="233" rx="16" fill="#0B0E14" stroke="#242A34" stroke-width="1.5"/>
+  <text x="150" y="50" font-size="15" letter-spacing="2" fill="#33212C">xenv:v4:&lt;salt&gt;:&lt;iter&gt;:&lt;iv&gt;:&lt;ct&gt;:&lt;mac&gt;</text>
 
-  <rect x="6" y="6" width="668" height="228" rx="26" fill="#0B0E14" stroke="#2A2F3A" stroke-width="2"/>
-  <text x="152" y="52" font-size="16" letter-spacing="1" fill="#3A2740">xenv:v4:&lt;salt&gt;:&lt;iter&gt;:&lt;iv&gt;:&lt;ct&gt;:&lt;mac&gt;</text>
-
-  <!-- metal skull &amp; crossbones -->
-  <g transform="translate(40,72) scale(0.76)" filter="url(#glow)">
-    <g fill="url(#neon)" stroke="url(#neon)" stroke-width="13" stroke-linejoin="miter" stroke-linecap="butt">
-      <line x1="6" y1="26" x2="106" y2="124"/>
-      <line x1="106" y1="26" x2="6" y2="124"/>
-      <path d="M2 20 l10 -6 6 10 -10 6z"/><path d="M110 20 l-10 -6 -6 10 10 6z"/>
-      <path d="M2 130 l10 6 6 -10 -10 -6z"/><path d="M110 130 l-10 6 -6 -10 10 6z"/>
+  <!-- pirate mark: skull &amp; crossed bones — flat, crisp, refined -->
+  <g transform="translate(52,64) scale(0.74)" fill="#FF2E88">
+    <g stroke="#FF2E88" stroke-width="8">
+      <line x1="12" y1="28" x2="100" y2="116"/><line x1="100" y1="28" x2="12" y2="116"/>
     </g>
-    <path d="M18 44 L30 14 L56 4 L82 14 L94 44 L88 66 L104 74 L86 82 L80 100 L56 116 L32 100 L26 82 L8 74 L24 66 Z" fill="url(#neon)"/>
-    <!-- mean slit eyes, angled down toward the nose -->
-    <path d="M20 46 L52 62 L24 68 Z" fill="#0B0E14"/>
-    <path d="M92 46 L60 62 L88 68 Z" fill="#0B0E14"/>
-    <!-- sharp nose -->
-    <path d="M50 66 L62 66 L56 90 Z" fill="#0B0E14"/>
-    <!-- fanged maw: dark mouth + long needle-thin interlocking fangs -->
-    <path d="M30 88 L82 88 L78 112 L56 118 L34 112 Z" fill="#0B0E14"/>
-    <path d="M35 88 l3 0 -1.5 27 z M42 88 l3 0 -1.5 24 z M49 88 l3 0 -1.5 28 z M56 88 l3 0 -1.5 25 z M63 88 l3 0 -1.5 28 z M70 88 l3 0 -1.5 23 z" fill="url(#neon)"/>
-    <path d="M39 113 l3 0 -1.5 -23 z M47 115 l3 0 -1.5 -26 z M55 116 l3 0 -1.5 -27 z M63 115 l3 0 -1.5 -26 z M71 113 l3 0 -1.5 -22 z" fill="url(#neon)"/>
+    <g fill="#FF2E88">
+      <circle cx="10" cy="24" r="6"/><circle cx="18" cy="32" r="6"/><circle cx="102" cy="24" r="6"/><circle cx="94" cy="32" r="6"/>
+      <circle cx="10" cy="120" r="6"/><circle cx="18" cy="112" r="6"/><circle cx="102" cy="120" r="6"/><circle cx="94" cy="112" r="6"/>
+    </g>
+    <path d="M56 8 C78 8 92 26 92 48 C92 61 87 68 83 74 L88 80 L81 84
+             C80 95 73 103 66 106 L64 116 L48 116 L46 106 C39 103 32 95 31 84
+             L24 80 L29 74 C25 68 20 61 20 48 C20 26 34 8 56 8 Z"/>
+    <path d="M28 46 L46 52 L44 64 L29 60 Z" fill="#0B0E14"/>
+    <path d="M84 46 L66 52 L68 64 L83 60 Z" fill="#0B0E14"/>
+    <path d="M51 64 L61 64 L56 78 Z" fill="#0B0E14"/>
+    <g fill="#0B0E14">
+      <rect x="44" y="86" width="24" height="2.4"/>
+      <rect x="50" y="86" width="2.4" height="20"/><rect x="56.8" y="86" width="2.4" height="22"/><rect x="63.5" y="86" width="2.4" height="20"/>
+    </g>
   </g>
 
-  <!-- wordmark with metal umlaut -->
-  <text x="150" y="176" font-size="132" font-weight="800" letter-spacing="-3"
-        fill="url(#neon)" stroke="url(#neon)" stroke-width="3.5" filter="url(#glow)">xenv</text>
-  <g fill="#FF12A6" filter="url(#glow)"><circle cx="266" cy="74" r="6.5"/><circle cx="282" cy="74" r="6.5"/></g>
+  <!-- wordmark: tight, crisp, no glow, no stroke -->
+  <text x="150" y="172" font-size="126" font-weight="700" letter-spacing="-4" fill="#FF2E88">xenv</text>
+  <g fill="#FF2E88"><circle cx="250" cy="76" r="5.5"/><circle cx="266" cy="76" r="5.5"/></g>
+  <rect x="468" y="90" width="11" height="86" fill="#FF2E88"/>
 
-  <!-- blinking cursor -->
-  <rect x="508" y="84" width="46" height="98" rx="4" fill="#FF12A6" filter="url(#glow)">
-    <animate attributeName="opacity" values="1;1;0.08;0.08" keyTimes="0;0.5;0.5;1" dur="1.06s" repeatCount="indefinite"/>
-  </rect>
-
-  <text x="178" y="210" font-size="18" letter-spacing="0.5" fill="#7C8698">encrypted env · one file per key · POSIX</text>
+  <text x="152" y="206" font-size="17" letter-spacing="1" fill="#79828F">encrypted env · one file per key · POSIX</text>
 </svg>
