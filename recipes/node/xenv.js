@@ -90,6 +90,11 @@ function decryptEnvelope(envelope, passphrase, v3EncKey, v3MacKey) {
     if (parts.length !== 7) throw new Error('envelope: wrong field count');
     let saltHex, iter;
     [, , saltHex, iter, ivHex, ctHex, macHex] = parts;
+    if (!/^[0-9a-f]{32}$/.test(saltHex)) throw new Error('envelope: bad salt');
+    // iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
+    if (!/^[0-9]+$/.test(iter) || Number(iter) < 1 || Number(iter) > 10000000) {
+      throw new Error('envelope: bad iter');
+    }
     ({ encKey, macKey } = deriveKeys(passphrase, saltHex, iter));
     macScope = `v4:${saltHex}:${iter}:${ivHex}:${ctHex}`;
   } else {

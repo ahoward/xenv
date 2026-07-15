@@ -139,7 +139,12 @@ public class Xenv {
       if (parts.length != 7) throw new RuntimeException("envelope: wrong field count");
       String saltHex = parts[2], iterStr = parts[3];
       ivHex = parts[4]; ctHex = parts[5]; macHex = parts[6];
-      byte[][] k = deriveKeys(passphrase, saltHex, Integer.parseInt(iterStr));
+      if (saltHex.length() != 32) throw new RuntimeException("envelope: bad salt");
+      // iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
+      if (!DIGITS.matcher(iterStr).matches()) throw new RuntimeException("envelope: bad iter");
+      int iterVal = Integer.parseInt(iterStr);
+      if (iterVal < 1 || iterVal > 10_000_000) throw new RuntimeException("envelope: bad iter");
+      byte[][] k = deriveKeys(passphrase, saltHex, iterVal);
       encKey = k[0]; macKey = k[1];
       macScope = "v4:" + saltHex + ":" + iterStr + ":" + ivHex + ":" + ctHex;
     } else {

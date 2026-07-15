@@ -108,7 +108,12 @@ defmodule Xenv do
         "v4" ->
           unless length(parts) == 7, do: raise("envelope: wrong field count")
           [_, _, salt, it, iv, ct, mac] = parts
-          {e, m} = derive_keys(passphrase, salt, String.to_integer(it))
+          unless Regex.match?(~r/\A[0-9a-f]{32}\z/, salt), do: raise("envelope: bad salt")
+          # iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
+          unless Regex.match?(~r/\A[0-9]+\z/, it), do: raise("envelope: bad iter")
+          iter = String.to_integer(it)
+          unless iter >= 1 and iter <= 10_000_000, do: raise("envelope: bad iter")
+          {e, m} = derive_keys(passphrase, salt, iter)
           {e, m, iv, ct, mac, "v4:#{salt}:#{it}:#{iv}:#{ct}"}
 
         other ->

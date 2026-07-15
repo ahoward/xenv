@@ -45,6 +45,8 @@ XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
 XENV_ITER=200000
+XENV_ITER_MAX=10000000   # reject envelopes whose embedded iter exceeds this
+                         # (v4 iter is attacker-controllable → PBKDF2 DoS guard)
 XENV_SALT_BYTES=16
 XENV_IV_BYTES=16
 XENV_KEY_BYTES=32
@@ -61,6 +63,40 @@ XENV_DEFAULT_ENVS="testing development staging production"
 err()  { printf 'xenv: %s\n' "$*" >&2; }
 die()  { err "$*"; exit 1; }
 info() { printf 'xenv: %s\n' "$*" >&2; }
+
+# ── name validation ───────────────────────────────────────────────
+#
+# Key names become shell variables (`eval "$name=..."` in run) and env
+# names are interpolated into a var name that is `eval`'d in the cascade
+# (`eval "val=\${$vname}"`). Both MUST be constrained or a crafted
+# filename / env name is arbitrary code execution when a vault is loaded.
+# Values are still unrestricted bytes — only the NAMES are validated.
+
+# a key name must be a POSIX shell identifier (it becomes an env var).
+is_key_name() {
+  case "$1" in
+    ''|[0-9]*|*[!A-Za-z0-9_]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# an env name: conservative charset, no shell metacharacters.
+is_env_name() {
+  case "$1" in
+    ''|*[!A-Za-z0-9_-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# valid_iter <n> — a positive integer within the DoS-safe ceiling. The
+# length guard keeps the numeric compare from overflowing the shell's
+# integer on a pathologically long digit string. v4 embeds iter in the
+# (unauthenticated) envelope, so an unbounded value would let a crafted
+# vault burn CPU in PBKDF2 before the MAC can even be checked.
+valid_iter() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  [ "${#1}" -le 8 ] && [ "$1" -ge 1 ] && [ "$1" -le "$XENV_ITER_MAX" ]
+}
 
 # ── hex helpers (POSIX awk, no xxd) ───────────────────────────────
 
@@ -361,7 +397,7 @@ EOF
   cmp_key=$(openssl rand -hex 32)
   mac_a=$(printf '%s' "$mac_hex"  | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$cmp_key" -binary 2>/dev/null | hex_encode)
   mac_b=$(printf '%s' "$expected" | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$cmp_key" -binary 2>/dev/null | hex_encode)
-  [ "$mac_a" = "$mac_b" ] || { err "MAC verification failed — wrong key or tampered vault"; return 1; }
+  [ -n "$mac_a" ] && [ "$mac_a" = "$mac_b" ] || { err "MAC verification failed — wrong key or tampered vault"; return 1; }
 
   printf '%s' "$ct_hex" | hex_decode \
     | openssl enc -d -aes-256-cbc -K "$enc_key_hex" -iv "$iv_hex" 2>/dev/null
@@ -430,7 +466,7 @@ EOF
   [ "$ver" = "v4" ]          || { err "unsupported vault version: $ver"; return 1; }
   [ -z "$extra" ]            || { err "envelope has extra fields"; return 1; }
   [ "${#salt_hex}" -eq 32 ]  || { err "invalid salt length"; return 1; }
-  case "$iter" in ""|*[!0-9]*) err "invalid iter"; return 1 ;; esac
+  valid_iter "$iter"         || { err "invalid or out-of-range iter"; return 1; }
   [ "${#iv_hex}" -eq 32 ]    || { err "invalid iv length"; return 1; }
   [ "${#mac_hex}" -eq 64 ]   || { err "invalid mac length"; return 1; }
   [ "${#ct_hex}" -gt 0 ] && [ $((${#ct_hex} % 32)) -eq 0 ] \
@@ -447,7 +483,7 @@ EOF
   cmp_key=$(openssl rand -hex 32)
   mac_a=$(printf '%s' "$mac_hex"  | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$cmp_key" -binary 2>/dev/null | hex_encode)
   mac_b=$(printf '%s' "$expected" | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$cmp_key" -binary 2>/dev/null | hex_encode)
-  [ "$mac_a" = "$mac_b" ] || { err "MAC verification failed — wrong key or tampered vault"; return 1; }
+  [ -n "$mac_a" ] && [ "$mac_a" = "$mac_b" ] || { err "MAC verification failed — wrong key or tampered vault"; return 1; }
 
   printf '%s' "$ct_hex" | hex_decode \
     | openssl enc -d -aes-256-cbc -K "$enc_key_hex" -iv "$iv_hex" 2>/dev/null
@@ -478,7 +514,7 @@ decrypt_envelope() {
       iter=${rest%%:*}
       case "$salt_hex" in ""|*[!0-9a-f]*) err "v4: bad salt"; return 1 ;; esac
       [ "${#salt_hex}" -eq 32 ] || { err "v4: bad salt length"; return 1; }
-      case "$iter" in ""|*[!0-9]*) err "v4: bad iter"; return 1 ;; esac
+      valid_iter "$iter" || { err "v4: invalid or out-of-range iter"; return 1; }
       read -r e4 m4 <<EOF
 $(derive_keys "$passphrase" "$salt_hex" "$iter")
 EOF
@@ -1678,6 +1714,7 @@ cmd_set() {
   esac
 
   [ -n "$name" ] || die "key name is empty"
+  is_key_name "$name" || die "invalid key name: $name (must be a shell identifier: [A-Za-z_][A-Za-z0-9_]*)"
 
   write_value "$env_name" "$name" "$value" || exit 1
   info "set $name in $dir"
@@ -1784,6 +1821,9 @@ cmd_run() {
   for f in "$dir"/*"$XENV_VALUE_EXT"; do
     [ -f "$f" ] || continue
     name=${f##*/}; name=${name%"$XENV_VALUE_EXT"}
+    # the name becomes a shell var via eval — reject anything that isn't a
+    # plain identifier (a crafted filename would otherwise be code execution).
+    is_key_name "$name" || die "refusing to export unsafe key name: $name"
     value=$(decrypt_envelope "$pp" "$v3_enc" "$v3_mac" < "$f") || die "decrypt failed for $name"
     eval "$name=\$value"
     export "$name"
@@ -1933,6 +1973,12 @@ main() {
   # $found stays 0 here, so the env is "implicit" — see the no-verb case.
   if [ -z "$env_name" ] && [ -n "${XENV_ENV:-}" ]; then
     env_name=$XENV_ENV
+  fi
+
+  # The env name is interpolated into a var name that gets eval'd during
+  # passphrase resolution — reject shell metacharacters before it's used.
+  if [ -n "$env_name" ]; then
+    is_env_name "$env_name" || die "invalid env name: $env_name"
   fi
 
   cmd=${1:-}

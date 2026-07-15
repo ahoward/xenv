@@ -133,7 +133,11 @@ static class Xenv
             if (parts.Length != 7) throw new Exception("envelope: wrong field count");
             string saltHex = parts[2], iterStr = parts[3];
             ivHex = parts[4]; ctHex = parts[5]; macHex = parts[6];
-            (encKey, macKey) = DeriveKeys(passphrase, saltHex, int.Parse(iterStr));
+            if (!Regex.IsMatch(saltHex, "^[0-9a-f]{32}$")) throw new Exception("envelope: bad salt");
+            // iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
+            if (!Regex.IsMatch(iterStr, "^[0-9]+$") || !int.TryParse(iterStr, out int iterVal) || iterVal < 1 || iterVal > 10_000_000)
+                throw new Exception("envelope: bad iter");
+            (encKey, macKey) = DeriveKeys(passphrase, saltHex, iterVal);
             macScope = $"v4:{saltHex}:{iterStr}:{ivHex}:{ctHex}";
         }
         else

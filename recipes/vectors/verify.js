@@ -28,6 +28,9 @@ function decrypt(envelope, passphrase, v3Salt, v3Iter) {
   } else if (parts[1] === "v4") {
     if (parts.length !== 7) throw new Error("envelope: wrong field count");
     [, , saltHex, iter, ivHex, ctHex, macHex] = parts;
+    if (!/^[0-9a-f]{32}$/.test(saltHex)) throw new Error("envelope: bad salt");
+    // iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
+    if (!/^[0-9]+$/.test(iter) || Number(iter) < 1 || Number(iter) > 10000000) throw new Error("envelope: bad iter");
     scope = `v4:${saltHex}:${iter}:${ivHex}:${ctHex}`;
   } else {
     throw new Error(`envelope: unsupported version ${parts[1]}`);

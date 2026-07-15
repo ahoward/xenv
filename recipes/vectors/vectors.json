@@ -148,6 +148,17 @@
       "envelope": "xenv:v4:e048f5c56c21d385beb54a63ddc84f68:200000:87a863d8c1eae6c30a5ab870ed6c38e7:e7e00b57d22ff38cd6a60fa44ecb04c7:d37750d048d652e19f85b62c60075762e32ccb784eae307701ed35c25600fcc1",
       "expect": "mac_fail",
       "note": "v4 ciphertext with one nibble flipped; MUST fail MAC"
+    },
+    {
+      "name": "v4-huge-iter",
+      "wire": "v4",
+      "env": "production",
+      "key": "V4_HELLO",
+      "iter": 999999999,
+      "salt": "e048f5c56c21d385beb54a63ddc84f68",
+      "envelope": "xenv:v4:e048f5c56c21d385beb54a63ddc84f68:999999999:87a863d8c1eae6c30a5ab870ed6c38e7:f7e00b57d22ff38cd6a60fa44ecb04c7:d37750d048d652e19f85b62c60075762e32ccb784eae307701ed35c25600fcc1",
+      "expect": "mac_fail",
+      "note": "iter far above the DoS ceiling; a conformant reader MUST reject before running PBKDF2"
     }
   ]
 }

@@ -246,7 +246,7 @@ Seven colon-separated fields. Validate:
 
 - `xenv` is literally `xenv`; `v4` is literally `v4`.
 - `<salt-hex>` — exactly 32 hex chars (16-byte PBKDF2 salt), **unique per value** (fresh random on every write).
-- `<iter>` — PBKDF2 iteration count; matches `^[0-9]+$`, ≥ 1 (e.g. `200000`).
+- `<iter>` — PBKDF2 iteration count; matches `^[0-9]+$` (e.g. `200000`). A conformant reader MUST bound it: `1 ≤ iter ≤ 10_000_000`, checked **before** deriving keys. Because v4's `iter` is in the unauthenticated envelope and drives the KDF that produces the MAC key, an unbounded value is a PBKDF2 denial-of-service. Reject out-of-range `iter` without running the KDF.
 - `<iv-hex>` — exactly 32 hex chars (16-byte AES IV).
 - `<ct-hex>` — a positive multiple of 32 hex chars (CBC block-aligned).
 - `<mac-hex>` — exactly 64 hex chars (32-byte HMAC-SHA256).

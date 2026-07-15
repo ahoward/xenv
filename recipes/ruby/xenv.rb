@@ -98,6 +98,9 @@ module Xenv
     when 'v4'
       raise 'envelope: wrong field count' unless parts.length == 7
       _, _, salt_hex, iter, iv_hex, ct_hex, mac_hex = parts
+      raise 'envelope: bad salt' unless salt_hex.match?(/\A[0-9a-f]{32}\z/)
+      # iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
+      raise 'envelope: bad iter' unless iter.match?(/\A[0-9]+\z/) && iter.to_i.between?(1, 10_000_000)
       enc_key, mac_key = derive_keys(passphrase, salt_hex, iter.to_i)
       mac_scope = "v4:#{salt_hex}:#{iter}:#{iv_hex}:#{ct_hex}"
     else

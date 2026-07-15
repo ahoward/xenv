@@ -100,6 +100,11 @@ def _decrypt_envelope(envelope: str, passphrase: str, v3_enc: bytes, v3_mac: byt
         if len(parts) != 7:
             raise ValueError("envelope: wrong field count")
         _, _, salt_hex, it, iv_hex, ct_hex, mac_hex = parts
+        if not re.fullmatch(r"[0-9a-f]{32}", salt_hex):
+            raise ValueError("envelope: bad salt")
+        # iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
+        if not re.fullmatch(r"[0-9]+", it) or not (1 <= int(it) <= 10_000_000):
+            raise ValueError("envelope: bad iter")
         enc_key, mac_key = _derive_keys(passphrase, salt_hex, int(it))
         mac_scope = f"v4:{salt_hex}:{it}:{iv_hex}:{ct_hex}"
     else:

@@ -139,8 +139,12 @@ func decryptEnvelope(envelope, passphrase string, v3Enc, v3Mac []byte) ([]byte, 
 		}
 		saltHex, iterStr := parts[2], parts[3]
 		ivHex, ctHex, macHex = parts[4], parts[5], parts[6]
+		if len(saltHex) != 32 {
+			return nil, errors.New("envelope: bad salt")
+		}
+		// iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
 		iter, err := strconv.Atoi(iterStr)
-		if err != nil {
+		if err != nil || iter < 1 || iter > 10_000_000 {
 			return nil, errors.New("envelope: bad iter")
 		}
 		encKey, macKey, err = deriveKeys(passphrase, saltHex, iter)

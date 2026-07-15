@@ -226,9 +226,16 @@ fn decrypt_envelope(
                 return Err(Error::Format("envelope: wrong field count".into()));
             }
             let salt_hex = parts[2];
+            if salt_hex.len() != 32 {
+                return Err(Error::Format("envelope: bad salt".into()));
+            }
+            // iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
             let iter: u32 = parts[3]
                 .parse()
                 .map_err(|_| Error::Format("envelope: bad iter".into()))?;
+            if !(1..=10_000_000).contains(&iter) {
+                return Err(Error::Format("envelope: bad iter".into()));
+            }
             let salt =
                 hex_decode(salt_hex).ok_or_else(|| Error::Format("non-hex salt".into()))?;
             let (e, m) = derive_keys(passphrase, &salt, iter);

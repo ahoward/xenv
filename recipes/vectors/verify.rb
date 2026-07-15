@@ -37,6 +37,9 @@ def decrypt(envelope, passphrase, v3_salt, v3_iter)
     scope = "v3:#{iv_hex}:#{ct_hex}"
   when "v4"
     _, _, salt_hex, iter, iv_hex, ct_hex, mac_hex, extra = parts
+    raise "envelope: bad salt" unless salt_hex.to_s.match?(/\A[0-9a-f]{32}\z/)
+    # iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
+    raise "envelope: bad iter" unless iter.to_s.match?(/\A[0-9]+\z/) && iter.to_i.between?(1, 10_000_000)
     scope = "v4:#{salt_hex}:#{iter}:#{iv_hex}:#{ct_hex}"
   else
     raise "envelope: unsupported version #{parts[1]}"

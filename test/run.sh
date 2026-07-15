@@ -924,6 +924,40 @@ EOF
   echo "$out" | grep -qi "MAC verification" || return 1
 }
 
+test_v4_huge_iter_rejected() {
+  # v4 iter is attacker-controllable and drives PBKDF2 before the MAC can
+  # be checked — a huge value must be rejected fast, not run to a hang.
+  xenv setup >/dev/null 2>&1
+  printf 'xenv:v4:%032d:999999999:%032d:%032d:%064d\n' 1 2 3 4 \
+    > xenv/envs/production/DOS.value.enc
+  out=$(xenv get @production DOS 2>&1) && return 1
+  echo "$out" | grep -qi "iter" || return 1
+}
+
+test_run_rejects_unsafe_key_name() {
+  # a crafted filename becomes a shell var via eval in `run` — must refuse,
+  # never execute. Regression for the key-name RCE.
+  xenv setup >/dev/null 2>&1
+  cp xenv/envs/production/APP_ENV.value.enc "xenv/envs/production/x;touch PWNED;.value.enc" 2>/dev/null
+  out=$(xenv run @production true 2>&1) && :
+  [ -f PWNED ] && return 1   # RCE happened
+  echo "$out" | grep -qi "unsafe key name" || return 1
+}
+
+test_set_rejects_bad_key_name() {
+  xenv setup >/dev/null 2>&1
+  out=$(xenv set @production 'BAD-NAME=x' 2>&1) && return 1
+  echo "$out" | grep -qi "invalid key name" || return 1
+}
+
+test_bad_env_name_rejected() {
+  # an env name with shell metacharacters reaches an eval in the cascade.
+  xenv setup >/dev/null 2>&1
+  out=$(xenv get '@p;touch ENVPWN' APP_ENV 2>&1) && :
+  [ -f ENVPWN ] && return 1
+  echo "$out" | grep -qi "invalid env name" || return 1
+}
+
 test_envelope_short_iv_rejected() {
   xenv setup >/dev/null 2>&1
   printf 'xenv:v3:deadbeef:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n' \
@@ -1227,6 +1261,10 @@ run_test "rotate changes key preserves values"      test_rotate_changes_key_pres
 run_test "wrong key fails MAC"                      test_wrong_key_fails_mac
 run_test "env var beats file backend"               test_env_var_beats_file_backend
 run_test "tampered ciphertext rejected"             test_tampered_ciphertext_rejected
+run_test "v4 huge iter rejected (DoS guard)"        test_v4_huge_iter_rejected
+run_test "run refuses unsafe key name (RCE)"        test_run_rejects_unsafe_key_name
+run_test "set rejects bad key name"                 test_set_rejects_bad_key_name
+run_test "bad env name rejected (injection)"        test_bad_env_name_rejected
 run_test "envelope short iv rejected"               test_envelope_short_iv_rejected
 run_test "envelope bad hex rejected"                test_envelope_bad_hex_rejected
 run_test "envelope extra fields rejected"           test_envelope_extra_fields_rejected

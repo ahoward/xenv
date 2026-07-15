@@ -168,6 +168,13 @@ function decrypt_value(string $envelope, string $passphrase, string $v3Salt, int
             throw new Exception("Malformed envelope: expected 7 parts, found " . count($parts));
         }
         list(, , $saltHex, $iterStr, $ivHex, $ctHex, $macHex) = $parts;
+        if (!preg_match('/^[0-9a-f]{32}$/', $saltHex)) {
+            throw new Exception("Invalid v4 salt");
+        }
+        // iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
+        if (!preg_match('/^[0-9]+$/', $iterStr) || (int)$iterStr < 1 || (int)$iterStr > 10000000) {
+            throw new Exception("Invalid v4 iter");
+        }
         $salt = $saltHex;
         $iter = (int)$iterStr;
         $macData = "v4:{$saltHex}:{$iterStr}:{$ivHex}:{$ctHex}";
