@@ -223,6 +223,82 @@ Use a CSPRNG for the IV (`os.urandom` in Python, `crypto.randomBytes` in Node, `
 
 Atomicity matters: write the new envelope to a temp file, then `rename(2)` it into place. POSIX rename is atomic on the same filesystem. Don't write to the destination file directly — a crash mid-write would corrupt the value.
 
+## the v4 envelope — self-contained (target format)
+
+> **Status: specified, not yet the default. Tracked in issue #12.** v3 stays
+> fully supported; a conformant reader accepts **both** v3 and v4. Writers
+> emit v4 for new values once implemented (#13); `xenv migrate` (#14)
+> re-encrypts existing v3 values to v4 in place.
+
+v3 keeps the KDF `salt` and `iter` in the per-env `README.md` frontmatter.
+That couples a value to its directory: copy a lone `.value.enc` somewhere
+else, or restore a single variable from git history, and it can no longer be
+decrypted on its own. **v4 removes the coupling by embedding the KDF
+parameters in the envelope itself**, so one file plus the passphrase is
+everything you need — the durable "recover one secret, in any language,
+decades later" primitive.
+
+```
+xenv:v4:<salt-hex>:<iter>:<iv-hex>:<ct-hex>:<mac-hex>
+```
+
+Seven colon-separated fields. Validate:
+
+- `xenv` is literally `xenv`; `v4` is literally `v4`.
+- `<salt-hex>` — exactly 32 hex chars (16-byte PBKDF2 salt), **unique per value** (fresh random on every write).
+- `<iter>` — PBKDF2 iteration count; matches `^[0-9]+$`, ≥ 1 (e.g. `200000`).
+- `<iv-hex>` — exactly 32 hex chars (16-byte AES IV).
+- `<ct-hex>` — a positive multiple of 32 hex chars (CBC block-aligned).
+- `<mac-hex>` — exactly 64 hex chars (32-byte HMAC-SHA256).
+- Reject any envelope with more or fewer than these seven fields.
+
+### key derivation (v4)
+
+Identical PBKDF2-SHA256 as v3 — but `salt` and `iter` come from **the
+envelope**, not the README. The per-env `README.md` frontmatter is **not
+consulted** for v4 values.
+
+```
+enc-key ‖ mac-key = PBKDF2-SHA256(passphrase, hex_decode(salt-hex), iter, dkLen=64)
+first 32 bytes = enc-key,  last 32 bytes = mac-key
+```
+
+### MAC scope (v4)
+
+Encrypt-then-MAC over a scope that binds **every** parameter affecting
+decryption — version, salt, iterations, IV, ciphertext:
+
+```
+MAC = HMAC-SHA256(mac-key, "v4:<salt-hex>:<iter>:<iv-hex>:<ct-hex>")
+```
+
+The scope is that literal ASCII string: same field order, same lowercase
+hex, `<iter>` in decimal exactly as written in the envelope. Because salt and
+iterations feed both the derived key **and** the MAC scope, tampering either
+fails verification two ways over. Verify the MAC **before** decrypting, same
+as v3.
+
+### reading both versions (dual-read)
+
+Dispatch on the second field:
+
+| version | salt / iter source | MAC scope |
+|---------|--------------------|-----------|
+| `v3`    | sibling `README.md` frontmatter | `v3:<iv>:<ct>` |
+| `v4`    | the envelope itself             | `v4:<salt>:<iter>:<iv>:<ct>` |
+
+A conformant loader reads both. Everything else — PBKDF2-SHA256, the 64-byte
+split, AES-256-CBC, PKCS#7, constant-time HMAC compare — is unchanged.
+
+### why per-value salt
+
+- **Isolation.** One file + the passphrase decrypts, with no sibling state to carry along.
+- **Per-value cost bumps.** Raise `<iter>` on new writes as hardware improves; old values keep their own counts and still decrypt — no global re-encryption.
+- **Unique salts.** Identical plaintexts under the same passphrase yield unrelated derived keys and envelopes.
+
+Test vectors for v4 land in [`recipes/vectors/`](vectors/) once a v4 writer
+exists (#13); the existing v3 vectors keep gating the read path meanwhile.
+
 ## passphrase resolution
 
 A recipe reads the passphrase from environment variables, in this order:
