@@ -7,6 +7,51 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.12.0-posix] — 2026-07-15
+
+The self-contained **v4 envelope**, dual-read everywhere, plus a security
+hardening pass. Existing v3 vaults keep working — readers accept both.
+
+### Added
+
+- **v4 self-contained envelope** — `xenv:v4:<salt>:<iter>:<iv>:<ct>:<mac>`.
+  The KDF salt and iteration count move from the per-env README frontmatter
+  into the envelope itself, so a single `.value.enc` decrypts in isolation:
+  one file plus the passphrase, no sibling state. Per-value salt (unique per
+  write); per-value iteration counts (raise `iter` on new writes over time
+  without touching old ones). The tool **writes v4** and **reads both v3 and
+  v4**; `set`/`edit`/`rotate` all produce v4. MAC scope binds
+  `v4:<salt>:<iter>:<iv>:<ct>`. Spec: `recipes/README.md`.
+
+- **All nine loaders dual-read v3+v4** (Python, Node, Ruby, Go, Rust, PHP,
+  Java, C#, Elixir), cross-verified in CI against a mixed vault.
+
+- **Conformance vectors** — `recipes/vectors/`: an offline, tool-free oracle
+  (`vectors.json` + `verify.rb`/`verify.js`) covering v3 and v4, including
+  tampered and out-of-range cases. Generate a loader in any language and
+  prove it correct with no tool and no network.
+
+### Security
+
+- **v4 `iter` is bounded (`1..10_000_000`) before key derivation** in the
+  tool, all loaders, and the verifiers. v4 embeds `iter` in the
+  unauthenticated envelope and it drives the PBKDF2 that produces the MAC
+  key, so an unbounded value was a KDF denial-of-service; a crafted envelope
+  with a huge `iter` is now rejected without running the KDF.
+- **Key names are validated as shell identifiers.** `run` exports each value
+  via `eval`; a crafted filename (`x;cmd;.value.enc`) was arbitrary code
+  execution on `xenv run`. Names are now checked on `set` and before the
+  eval. Values remain unrestricted bytes.
+- **Env names are validated at dispatch** — they are interpolated into a
+  variable name that is `eval`'d during passphrase resolution.
+- **Constant-time MAC compare no longer passes on empty input** — both v3
+  and v4 require a non-empty digest before accepting.
+
+### Changed
+
+- README reframed and de-buzzed; `openssl` 3.0+ / LibreSSL caveat stated
+  plainly. `llms.txt` rewritten as an agent operating manual.
+
 ## [0.11.0-posix] — 2026-07-14
 
 ### Added
