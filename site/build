@@ -84,6 +84,10 @@ binary is present — shell out:
 `xenv @<env> ./cmd` runs a command with the env injected (nothing hits
 disk). `xenv list @<env>` lists key names without the passphrase.
 
+`xenv @<env> --dotenv > .env` dumps a plaintext `.env` cache (dotenv-safe
+quoting) — a human speed trade-off for boot-heavy apps, NOT for agents:
+gitignore and chmod 600 it. Prefer `--json` (in memory) when you can.
+
 ## the passphrase — never commit it
 
 It lives OUTSIDE the repo. For an app or agent at runtime it comes from
@@ -98,7 +102,8 @@ on disk, never print it, never write it into the repo.
 ## rules for agents
 
 - NEVER decrypt to a plaintext file you might `git add`. Use `--json`
-  (in memory) or `xenv @<env> CMD` (exec-time).
+  (in memory) or `xenv @<env> CMD` (exec-time). `--dotenv` writes plaintext
+  on purpose — that's a human's call, and the `.env` must be gitignored.
 - NEVER write secrets from application code. Writing (set/edit/rotate) is
   a human/CI action; loaders are read-only by design.
 - Everything under `xenv/` is safe to commit. The passphrase is the only

@@ -766,6 +766,66 @@ test_json_flag_not_eaten_by_run() {
   assert_eq "--json" "$out" "--json passes through to the run command"
 }
 
+test_dotenv_dump_quotes_values() {
+  # `xenv @env --dotenv` prints KEY="value" lines. Every value is
+  # double-quoted so spaces, '#', '=', and empties survive a .env loader.
+  xenv setup testing development staging production >/dev/null 2>&1
+  xenv set @production HELLO=world       >/dev/null 2>&1
+  xenv set @production 'HASH=a #b'       >/dev/null 2>&1
+  xenv set @production EMPTY=            >/dev/null 2>&1
+
+  out=$(xenv @production --dotenv) || return 1
+  # printf, not echo: a dash `echo` would mangle backslashes in later tests;
+  # keep every dotenv check on printf for consistency.
+  printf '%s\n' "$out" | grep -qx 'APP_ENV="production"' || return 1
+  printf '%s\n' "$out" | grep -qx 'HELLO="world"'        || return 1
+  printf '%s\n' "$out" | grep -qx 'HASH="a #b"'          || return 1
+  printf '%s\n' "$out" | grep -qx 'EMPTY=""'             || return 1
+}
+
+test_dotenv_dump_escapes_quote_and_backslash() {
+  # Only the two bytes that break a double-quoted string are escaped:
+  # backslash -> \\ and double-quote -> \". Nothing else.
+  xenv setup testing development staging production >/dev/null 2>&1
+  xenv set @production 'QUOTED=he said "hi"'  >/dev/null 2>&1
+  printf 'a\\b'  | xenv set @production BSLASH >/dev/null 2>&1
+
+  out=$(xenv @production --dotenv) || return 1
+  # printf, not echo — dash's echo would collapse the \\ we are asserting on.
+  # embedded double-quote -> \"
+  printf '%s\n' "$out" | grep -qxF 'QUOTED="he said \"hi\""' || return 1
+  # embedded backslash -> \\
+  printf '%s\n' "$out" | grep -qxF 'BSLASH="a\\b"' || return 1
+}
+
+test_dotenv_dump_multiline_is_literal() {
+  # Newlines are emitted as REAL newlines inside the quotes (a multi-line
+  # double-quoted value), not \n escapes — the subset every dotenv parser
+  # agrees on. So the value spans lines and the closing quote lands last.
+  xenv setup testing development staging production >/dev/null 2>&1
+  printf 'l1\nl2\nl3' | xenv set @production MULTI >/dev/null 2>&1
+
+  out=$(xenv @production --dotenv) || return 1
+  # opening line has the key and first segment, no closing quote yet
+  printf '%s\n' "$out" | grep -qx 'MULTI="l1' || return 1
+  # last segment carries the closing quote
+  printf '%s\n' "$out" | grep -qx 'l3"'       || return 1
+}
+
+test_dotenv_dump_needs_env() {
+  # --dotenv with no @env is an error.
+  xenv setup testing development staging production >/dev/null 2>&1
+  out=$(xenv --dotenv 2>&1) && return 1
+  printf '%s\n' "$out" | grep -qi "needs an env" || return 1
+}
+
+test_dotenv_flag_not_eaten_by_run() {
+  # When @env has a CMD, a trailing --dotenv is an argument to that CMD.
+  xenv setup testing development staging production >/dev/null 2>&1
+  out=$(xenv @development sh -c 'printf %s "$1"' -- --dotenv 2>&1) || return 1
+  assert_eq "--dotenv" "$out" "--dotenv passes through to the run command"
+}
+
 test_xenv_env_default_env() {
   # $XENV_ENV supplies the env when no @<env> is in argv.
   xenv setup testing development staging production >/dev/null 2>&1
@@ -1276,6 +1336,11 @@ run_test "@env --json escapes special chars"        test_json_dump_escapes_speci
 run_test "@env --json empty env is {}"              test_json_dump_empty_env_is_braces
 run_test "@env --json needs an env"                 test_json_dump_needs_env
 run_test "--json not eaten by run command"          test_json_flag_not_eaten_by_run
+run_test "@env --dotenv quotes values"              test_dotenv_dump_quotes_values
+run_test "@env --dotenv escapes \" and \\"           test_dotenv_dump_escapes_quote_and_backslash
+run_test "@env --dotenv multiline is literal"       test_dotenv_dump_multiline_is_literal
+run_test "@env --dotenv needs an env"               test_dotenv_dump_needs_env
+run_test "--dotenv not eaten by run command"        test_dotenv_flag_not_eaten_by_run
 run_test "XENV_ENV supplies default env"            test_xenv_env_default_env
 run_test "explicit @env beats XENV_ENV"             test_xenv_env_explicit_at_wins
 run_test "XENV_ENV drives run shorthand"            test_xenv_env_run_shorthand

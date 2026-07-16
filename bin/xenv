@@ -40,7 +40,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.14.0-posix"
+XENV_VERSION="0.15.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
@@ -145,6 +145,35 @@ json_string() {
         else if (b == 12) printf "\\f"
         else if (b == 13) printf "\\r"
         else if (b <  32) printf "\\u%04x", b
+        else              printf "%c", b
+      }
+    }
+  '
+  printf '"'
+}
+
+# dotenv_string — read stdin, emit a double-quoted .env value. Every value
+# is quoted (so spaces, '#', '=', and empties survive), and only the two
+# bytes that would break out of a double-quoted string are escaped:
+# backslash (\\) and double-quote (\"). Newlines, tabs, and everything else
+# are emitted as LITERAL bytes — a double-quoted value spans multiple lines.
+#
+# Why so minimal: the dotenv format is not standardized and parsers disagree
+# on \n/\t/\r escapes. python-dotenv unescapes them; Ruby's dotenv (v3) does
+# not (it leaves \n literal and turns \t into t). But ALL of python-dotenv,
+# Ruby dotenv, motdotla/dotenv, and godotenv agree on exactly two things
+# inside double quotes: \\ → \, \" → ", and a real newline stays a newline.
+# Escaping only those two — and emitting real newlines/tabs — is the subset
+# every loader round-trips. High bytes 0x80-0xFF pass through verbatim
+# (UTF-8 in, UTF-8 out). Empty input yields "".
+dotenv_string() {
+  printf '"'
+  od -An -vtu1 | awk '
+    {
+      for (i = 1; i <= NF; i++) {
+        b = $i
+        if      (b == 34) printf "\\\""
+        else if (b == 92) printf "\\\\"
         else              printf "%c", b
       }
     }
@@ -980,6 +1009,7 @@ xenv edit @<env> KEY               # decrypt → $EDITOR → re-encrypt
 xenv run  @<env> CMD [args]        # run a command with the env injected
 xenv @<env>    CMD [args]          # shorthand: `xenv @production ./server`
 xenv @<env>                        # no CMD: print KEY=value lines for the env
+xenv @<env> --dotenv > .env        # dump a plaintext .env cache (fast load)
 ```
 
 See `xenv help` for the full command list. Each env in `xenv/envs/`
@@ -1146,6 +1176,11 @@ usage:
   xenv @<env> --json                 print the env as one JSON object
                                      (language-neutral; load with any
                                      stdlib JSON parser)
+  xenv @<env> --dotenv               print dotenv-safe KEY="value" lines.
+                                     fast-load cache: dump once, let the
+                                       app read plaintext with no crypto:
+                                       xenv @<env> --dotenv > .env
+                                     (then add .env to .gitignore)
 
 each env is a directory: xenv/envs/<env>/
 each variable is one file: xenv/envs/<env>/KEY.value.enc
@@ -2076,6 +2111,42 @@ cmd_envdump_json() {
   trap - EXIT INT TERM HUP
 }
 
+# cmd_envdump_dotenv <env> — decrypt every value in <env> and print
+# dotenv-formatted KEY="value" lines to stdout, one per line. Unlike the
+# raw KEY=value peek (cmd_envdump), each value is double-quoted and escaped
+# (see dotenv_string), so values with spaces, '#', '=', newlines, quotes,
+# or leading/trailing whitespace survive a round-trip through a .env loader.
+#
+# This is the fast-load cache: decrypt once, write a plaintext .env, and let
+# the app read it directly with no per-boot crypto —
+#
+#   xenv @production --dotenv > .env   # then add .env to .gitignore
+#
+# Key names are already validated shell identifiers, so they need no quoting.
+cmd_envdump_dotenv() {
+  [ $# -ge 1 ] || die "envdump needs <env>"
+  env_name=$1
+
+  dir=$(env_dir "$env_name")
+  [ -d "$dir" ] || die "no env '$env_name'"
+
+  load_env_ctx "$env_name" || exit 1
+
+  umask 077
+  tmp=$(mktemp "${TMPDIR:-/tmp}/xenv-dotenv.XXXXXXXX") || die "mktemp failed"
+  trap 'rm -f "$tmp"' EXIT INT TERM HUP
+
+  for f in "$dir"/*"$XENV_VALUE_EXT"; do
+    [ -f "$f" ] || continue
+    name=${f##*/}; name=${name%"$XENV_VALUE_EXT"}
+    decrypt_envelope "$pp" "$ctx_salt" "$ctx_iter" "$env_okm" < "$f" > "$tmp" || die "decrypt failed for $name"
+    printf '%s=%s\n' "$name" "$(dotenv_string < "$tmp")"
+  done
+
+  rm -f "$tmp"
+  trap - EXIT INT TERM HUP
+}
+
 # ── dispatch ──────────────────────────────────────────────────────
 #
 # argv contract: an `@<env>` token may appear anywhere in argv. The
@@ -2221,6 +2292,10 @@ main() {
     --json)
       [ -n "$env_name" ] || die "--json needs an env: 'xenv @<env> --json'"
       cmd_envdump_json "$env_name"
+      ;;
+    --dotenv|--env)
+      [ -n "$env_name" ] || die "--dotenv needs an env: 'xenv @<env> --dotenv'"
+      cmd_envdump_dotenv "$env_name"
       ;;
 
     *)

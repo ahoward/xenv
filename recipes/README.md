@@ -120,6 +120,32 @@ directly, so your app needs only the passphrase (via env var) and a
 crypto library — not the `xenv` binary. `--json` is the shortcut for
 when the tool is already there.
 
+## the fast-load cache — `xenv @<env> --dotenv`
+
+Decryption is cheap but not free (one PBKDF2 per env, per process). If you
+boot often and don't want to pay it, dump a plaintext `.env` once and let
+the app read it directly — no xenv, no crypto, no per-boot cost:
+
+```sh
+xenv @production --dotenv > .env    # decrypt once → plaintext cache
+echo '.env' >> .gitignore           # never commit the plaintext
+```
+
+`--dotenv` prints `KEY="value"` lines. Every value is double-quoted (so
+spaces, `#`, `=`, and empties survive) and only the two bytes that would
+break a double-quoted string are escaped — backslash (`\\`) and double-quote
+(`\"`). Newlines are emitted as **real** newlines inside the quotes (a
+multi-line value), not `\n` escapes. That minimal subset is the one every
+common `.env` loader agrees on: python-dotenv, Ruby's dotenv, motdotla/dotenv
+(Node), and godotenv all round-trip it. (The dotenv format is not
+standardized — parsers disagree on `\n`/`\t`; xenv emits only what they
+share.)
+
+This is a **plaintext** file. It's a deliberate trade — speed for a secret
+on disk — so treat `.env` as sensitive: gitignore it, `chmod 600`, and
+regenerate rather than commit. If you'd rather not write plaintext at all,
+use a recipe (below) or `--json` and keep the secrets encrypted at rest.
+
 ## what xenv is, in one paragraph
 
 xenv stores encrypted environment variables in a project's repo. One file per variable. Each file contains a single line of the form `xenv:v3:<iv-hex>:<ct-hex>:<mac-hex>`. The per-env KDF parameters (`version`, `iter`, `salt`) live in YAML frontmatter at the top of a sibling `README.md`. The passphrase that pairs with those params lives **outside the repo** — for a deployed app, in an environment variable like `$XENV_KEY_PRODUCTION`.

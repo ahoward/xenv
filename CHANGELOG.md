@@ -7,6 +7,29 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.15.0-posix] — 2026-07-16
+
+Add a plaintext `.env` fast-load cache — decrypt once, skip per-boot crypto.
+
+### Added
+
+- **`xenv @<env> --dotenv`** — dump the env as dotenv-safe `KEY="value"`
+  lines to stdout (parallel to `--json`). The fast-load cache:
+  `xenv @production --dotenv > .env`, then let the app read plaintext with
+  no xenv and no per-boot KDF. Every value is double-quoted; only backslash
+  (`\\`) and double-quote (`\"`) are escaped; newlines are emitted as real
+  newlines inside the quotes. That minimal subset is what python-dotenv,
+  Ruby dotenv, motdotla/dotenv, and godotenv all round-trip (the dotenv
+  format is unstandardized and parsers disagree on `\n`/`\t`). `--env` is an
+  alias. Verified against real python-dotenv and ruby-dotenv.
+
+### Notes
+
+- `--dotenv` writes **plaintext** by design — a deliberate speed-for-secret
+  trade. Gitignore and `chmod 600` the `.env`. Prefer `--json` (in memory)
+  or a recipe when you don't want secrets at rest. The agent brief
+  (`llms.txt`) flags it as a human-only action.
+
 ## [0.14.0-posix] — 2026-07-16
 
 Make xenv fast without giving up self-contained envelopes: a two-level KDF
