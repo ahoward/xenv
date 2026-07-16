@@ -7,6 +7,16 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.13.1-posix] — 2026-07-16
+
+### Docs
+
+- `recipes/README.md`: document single-env repos and the sole-env default
+  — on-disk layout notes a project may have one env (the common case) or
+  several, how to discover env names, and that recipes stay explicit
+  (always pass `env_name`) while the shell tool lets you drop `@<env>` in
+  a one-env repo. No code change.
+
 ## [0.13.0-posix] — 2026-07-15
 
 Make the simple case just work: a single-env repo needs no `@<env>` and
