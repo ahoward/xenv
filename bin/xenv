@@ -40,7 +40,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.13.1-posix"
+XENV_VERSION="0.13.2-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"

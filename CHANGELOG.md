@@ -7,6 +7,15 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.13.2-posix] — 2026-07-16
+
+### Docs
+
+- Site `llms.txt`: the agent brief's detect section now notes a repo may
+  have one env (the common case) or several, and how an agent picks the
+  env to load (exactly one → default, `@<env>` optional; else by name).
+  No code change.
+
 ## [0.13.1-posix] — 2026-07-16
 
 ### Docs
