@@ -110,10 +110,11 @@ parsing, no crypto dependency, no per-language port.
 
 **When to use which:**
 
-| | needs `xenv` installed | needs a crypto lib | best for |
-|---|---|---|---|
-| `xenv @<env> --json` | yes | no | dev boxes, CI, containers that ship the tool |
-| a recipe (below) | no | yes | production apps that carry only the passphrase + your code |
+| | needs `xenv` installed | needs a crypto lib | secrets at rest | best for |
+|---|---|---|---|---|
+| `xenv @<env> --json` | yes | no | encrypted | dev boxes, CI, containers that ship the tool |
+| `xenv @<env> --dotenv` | yes (to dump) | no | **plaintext `.env`** | boot-heavy apps: dump once, read the cache with any dotenv loader ([below](#the-fast-load-cache--xenv-env---dotenv)) |
+| a recipe (below) | no | yes | encrypted | production apps that carry only the passphrase + your code |
 
 A recipe is the zero-lock-in path: it reads the on-disk envelopes
 directly, so your app needs only the passphrase (via env var) and a
