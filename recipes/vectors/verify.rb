@@ -30,6 +30,7 @@ def decrypt(envelope, passphrase, v3_salt, v3_iter)
   parts = envelope.strip.split(":")
   raise "envelope: not xenv" unless parts[0] == "xenv"
 
+  keys = nil
   case parts[1]
   when "v3"
     _, _, iv_hex, ct_hex, mac_hex, extra = parts
@@ -38,9 +39,16 @@ def decrypt(envelope, passphrase, v3_salt, v3_iter)
   when "v4"
     _, _, salt_hex, iter, iv_hex, ct_hex, mac_hex, extra = parts
     raise "envelope: bad salt" unless salt_hex.to_s.match?(/\A[0-9a-f]{32}\z/)
-    # iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
     raise "envelope: bad iter" unless iter.to_s.match?(/\A[0-9]+\z/) && iter.to_i.between?(1, 10_000_000)
     scope = "v4:#{salt_hex}:#{iter}:#{iv_hex}:#{ct_hex}"
+  when "v5"
+    _, _, salt_hex, iter, value_salt, iv_hex, ct_hex, mac_hex, extra = parts
+    raise "envelope: bad salt" unless salt_hex.to_s.match?(/\A[0-9a-f]{32}\z/) && value_salt.to_s.match?(/\A[0-9a-f]{32}\z/)
+    raise "envelope: bad iter" unless iter.to_s.match?(/\A[0-9]+\z/) && iter.to_i.between?(1, 10_000_000)
+    master = OpenSSL::PKCS5.pbkdf2_hmac(passphrase, [salt_hex].pack("H*"), iter.to_i, 64, OpenSSL::Digest.new("SHA256"))
+    okm = OpenSSL::KDF.hkdf(master, salt: [value_salt].pack("H*"), info: "xenv:v5", length: 64, hash: "SHA256")
+    keys = [okm[0, 32], okm[32, 32]]
+    scope = "v5:#{salt_hex}:#{iter}:#{value_salt}:#{iv_hex}:#{ct_hex}"
   else
     raise "envelope: unsupported version #{parts[1]}"
   end
@@ -50,7 +58,7 @@ def decrypt(envelope, passphrase, v3_salt, v3_iter)
   raise "envelope: ct not block-aligned" if ct_hex.empty? || ct_hex.length % 32 != 0
   raise "envelope: non-hex" unless "#{salt_hex}#{iv_hex}#{ct_hex}#{mac_hex}".match?(/\A[0-9a-f]+\z/)
 
-  enc_key, mac_key = derive_keys(passphrase, salt_hex, iter)
+  enc_key, mac_key = keys || derive_keys(passphrase, salt_hex, iter)
 
   # MAC verify FIRST — encrypt-then-MAC, constant-time.
   expected = OpenSSL::HMAC.digest("SHA256", mac_key, scope)

@@ -77,15 +77,22 @@ module Xenv
     [found['iter'].to_i, found['salt']]
   end
 
+  # raw 64-byte PBKDF2 output (the env "master"); slice or HKDF as needed.
+  def pbkdf2_okm(pass, salt_hex, iter)
+    OpenSSL::PKCS5.pbkdf2_hmac(pass, [salt_hex].pack('H*'), iter, 64, OpenSSL::Digest.new('SHA256'))
+  end
+
   def derive_keys(pass, salt_hex, iter)
-    salt = [salt_hex].pack('H*')
-    out  = OpenSSL::PKCS5.pbkdf2_hmac(pass, salt, iter, 64, OpenSSL::Digest.new('SHA256'))
-    [out[0, 32], out[32, 32]]
+    okm = pbkdf2_okm(pass, salt_hex, iter)
+    [okm[0, 32], okm[32, 32]]
   end
 
   # Dual-read: v3 uses the caller's README-derived keys; v4 is
   # self-contained — salt/iter come from the envelope.
-  def decrypt_envelope(envelope, passphrase, v3_enc, v3_mac)
+  # Dual-read v3/v4/v5. The caller precomputes env_okm = PBKDF2 over the
+  # env README salt/iter ONCE; per-value work is a slice (v3) or a cheap
+  # HKDF (v5). v4 is the legacy self-contained format (PBKDF2 per value).
+  def decrypt_envelope(envelope, passphrase, ctx_salt, ctx_iter, env_okm)
     parts = envelope.strip.split(':')
     raise 'envelope: not xenv' unless parts[0] == 'xenv'
 
@@ -93,16 +100,25 @@ module Xenv
     when 'v3'
       raise 'envelope: wrong field count' unless parts.length == 5
       _, _, iv_hex, ct_hex, mac_hex = parts
-      enc_key, mac_key = v3_enc, v3_mac
+      enc_key = env_okm[0, 32]; mac_key = env_okm[32, 32]
       mac_scope = "v3:#{iv_hex}:#{ct_hex}"
     when 'v4'
       raise 'envelope: wrong field count' unless parts.length == 7
       _, _, salt_hex, iter, iv_hex, ct_hex, mac_hex = parts
       raise 'envelope: bad salt' unless salt_hex.match?(/\A[0-9a-f]{32}\z/)
-      # iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
       raise 'envelope: bad iter' unless iter.match?(/\A[0-9]+\z/) && iter.to_i.between?(1, 10_000_000)
-      enc_key, mac_key = derive_keys(passphrase, salt_hex, iter.to_i)
+      okm = pbkdf2_okm(passphrase, salt_hex, iter.to_i)
+      enc_key = okm[0, 32]; mac_key = okm[32, 32]
       mac_scope = "v4:#{salt_hex}:#{iter}:#{iv_hex}:#{ct_hex}"
+    when 'v5'
+      raise 'envelope: wrong field count' unless parts.length == 8
+      _, _, kdf_salt, iter, value_salt, iv_hex, ct_hex, mac_hex = parts
+      raise 'envelope: bad salt' unless kdf_salt.match?(/\A[0-9a-f]{32}\z/) && value_salt.match?(/\A[0-9a-f]{32}\z/)
+      raise 'envelope: bad iter' unless iter.match?(/\A[0-9]+\z/) && iter.to_i.between?(1, 10_000_000)
+      ikm = (kdf_salt == ctx_salt && iter.to_i == ctx_iter) ? env_okm : pbkdf2_okm(passphrase, kdf_salt, iter.to_i)
+      okm = OpenSSL::KDF.hkdf(ikm, salt: [value_salt].pack('H*'), info: 'xenv:v5', length: 64, hash: 'SHA256')
+      enc_key = okm[0, 32]; mac_key = okm[32, 32]
+      mac_scope = "v5:#{kdf_salt}:#{iter}:#{value_salt}:#{iv_hex}:#{ct_hex}"
     else
       raise "envelope: unsupported version #{parts[1]}"
     end
@@ -151,11 +167,11 @@ module Xenv
   def get(env_name, key)
     iter, salt = read_params(env_name)
     pass = passphrase(env_name)
-    v3_enc, v3_mac = derive_keys(pass, salt, iter)
+    env_okm = pbkdf2_okm(pass, salt, iter)
     file = File.join(root, 'envs', env_name, key + VALUE_EXT)
     raise "no such key: #{key}" unless File.file?(file)
 
-    decrypt_envelope(File.binread(file), pass, v3_enc, v3_mac)
+    decrypt_envelope(File.binread(file), pass, salt, iter, env_okm)
   end
 
   def set(env_name, key, plaintext)
@@ -172,14 +188,14 @@ module Xenv
   def load(env_name)
     iter, salt = read_params(env_name)
     pass = passphrase(env_name)
-    v3_enc, v3_mac = derive_keys(pass, salt, iter)
+    env_okm = pbkdf2_okm(pass, salt, iter)   # ONE PBKDF2 for the whole env
     env_dir = File.join(root, 'envs', env_name)
     out = {}
     Dir.children(env_dir).sort.each do |file|
       next unless file.end_with?(VALUE_EXT)
 
       key = file[0...-VALUE_EXT.length]
-      out[key] = decrypt_envelope(File.binread(File.join(env_dir, file)), pass, v3_enc, v3_mac)
+      out[key] = decrypt_envelope(File.binread(File.join(env_dir, file)), pass, salt, iter, env_okm)
     end
     out
   end

@@ -1,9 +1,10 @@
 // CLI wrapper for the xenv recipe package, for use by recipes/try and recipes/test.
 //
 // Usage:
-//   go run ./main get  <env> <key>           # prints plaintext
-//   go run ./main set  <env> <key> <value>   # writes encrypted value
-//   go run ./main load <env>                 # prints KEY=value lines
+//
+//	go run ./main get  <env> <key>           # prints plaintext
+//	go run ./main set  <env> <key> <value>   # writes encrypted value
+//	go run ./main load <env>                 # prints KEY=value lines
 package main
 
 import (

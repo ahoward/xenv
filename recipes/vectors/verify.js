@@ -19,7 +19,7 @@ function decrypt(envelope, passphrase, v3Salt, v3Iter) {
   const parts = envelope.trim().split(":");
   if (parts[0] !== "xenv") throw new Error("envelope: not xenv");
 
-  let saltHex, iter, ivHex, ctHex, macHex, scope;
+  let saltHex, iter, ivHex, ctHex, macHex, scope, keys;
   if (parts[1] === "v3") {
     if (parts.length !== 5) throw new Error("envelope: wrong field count");
     [, , ivHex, ctHex, macHex] = parts;
@@ -32,6 +32,17 @@ function decrypt(envelope, passphrase, v3Salt, v3Iter) {
     // iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
     if (!/^[0-9]+$/.test(iter) || Number(iter) < 1 || Number(iter) > 10000000) throw new Error("envelope: bad iter");
     scope = `v4:${saltHex}:${iter}:${ivHex}:${ctHex}`;
+  } else if (parts[1] === "v5") {
+    if (parts.length !== 8) throw new Error("envelope: wrong field count");
+    let valueSalt;
+    [, , saltHex, iter, valueSalt, ivHex, ctHex, macHex] = parts;
+    if (!/^[0-9a-f]{32}$/.test(saltHex) || !/^[0-9a-f]{32}$/.test(valueSalt)) throw new Error("envelope: bad salt");
+    if (!/^[0-9]+$/.test(iter) || Number(iter) < 1 || Number(iter) > 10000000) throw new Error("envelope: bad iter");
+    // two-level KDF: PBKDF2 master over the shared salt, then HKDF per value.
+    const master = crypto.pbkdf2Sync(passphrase, Buffer.from(saltHex, "hex"), Number(iter), 64, "sha256");
+    const okm = Buffer.from(crypto.hkdfSync("sha256", master, Buffer.from(valueSalt, "hex"), Buffer.from("xenv:v5"), 64));
+    keys = { encKey: okm.subarray(0, 32), macKey: okm.subarray(32, 64) };
+    scope = `v5:${saltHex}:${iter}:${valueSalt}:${ivHex}:${ctHex}`;
   } else {
     throw new Error(`envelope: unsupported version ${parts[1]}`);
   }
@@ -40,7 +51,7 @@ function decrypt(envelope, passphrase, v3Salt, v3Iter) {
   if (!ctHex || ctHex.length % 32 !== 0) throw new Error("envelope: ct not block-aligned");
   if (!/^[0-9a-f]+$/.test(saltHex + ivHex + ctHex + macHex)) throw new Error("envelope: non-hex");
 
-  const { encKey, macKey } = deriveKeys(passphrase, saltHex, iter);
+  const { encKey, macKey } = keys || deriveKeys(passphrase, saltHex, iter);
   const expected = crypto.createHmac("sha256", macKey).update(scope, "ascii").digest();
   const provided = Buffer.from(macHex, "hex");
   if (expected.length !== provided.length || !crypto.timingSafeEqual(expected, provided)) {

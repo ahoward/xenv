@@ -67,15 +67,21 @@ function readParams(envName) {
   return { iter: parseInt(found.iter, 10), salt: found.salt };
 }
 
+// raw 64-byte PBKDF2 output (the env "master"); slice or HKDF as needed.
+function pbkdf2Okm(pass, saltHex, iters) {
+  return crypto.pbkdf2Sync(pass, Buffer.from(saltHex, 'hex'), Number(iters), 64, 'sha256');
+}
 function deriveKeys(pass, saltHex, iters) {
-  const salt = Buffer.from(saltHex, 'hex');
-  const out = crypto.pbkdf2Sync(pass, salt, Number(iters), 64, 'sha256');
+  const out = pbkdf2Okm(pass, saltHex, iters);
   return { encKey: out.subarray(0, 32), macKey: out.subarray(32, 64) };
 }
+const okmKeys = (okm) => ({ encKey: okm.subarray(0, 32), macKey: okm.subarray(32, 64) });
 
 // Dual-read: v3 uses the caller's README-derived keys; v4 is
 // self-contained — salt/iter come from the envelope.
-function decryptEnvelope(envelope, passphrase, v3EncKey, v3MacKey) {
+// Dual-read v3/v4/v5. Caller precomputes envOkm = PBKDF2 over the env
+// README salt/iter ONCE; per value it's a slice (v3) or a cheap HKDF (v5).
+function decryptEnvelope(envelope, passphrase, ctxSalt, ctxIter, envOkm) {
   const parts = envelope.trim().split(':');
   if (parts[0] !== 'xenv') throw new Error('envelope: not xenv');
 
@@ -83,20 +89,29 @@ function decryptEnvelope(envelope, passphrase, v3EncKey, v3MacKey) {
   if (parts[1] === 'v3') {
     if (parts.length !== 5) throw new Error('envelope: wrong field count');
     [, , ivHex, ctHex, macHex] = parts;
-    encKey = v3EncKey;
-    macKey = v3MacKey;
+    ({ encKey, macKey } = okmKeys(envOkm));
     macScope = `v3:${ivHex}:${ctHex}`;
   } else if (parts[1] === 'v4') {
     if (parts.length !== 7) throw new Error('envelope: wrong field count');
     let saltHex, iter;
     [, , saltHex, iter, ivHex, ctHex, macHex] = parts;
     if (!/^[0-9a-f]{32}$/.test(saltHex)) throw new Error('envelope: bad salt');
-    // iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
     if (!/^[0-9]+$/.test(iter) || Number(iter) < 1 || Number(iter) > 10000000) {
       throw new Error('envelope: bad iter');
     }
-    ({ encKey, macKey } = deriveKeys(passphrase, saltHex, iter));
+    ({ encKey, macKey } = okmKeys(pbkdf2Okm(passphrase, saltHex, iter)));
     macScope = `v4:${saltHex}:${iter}:${ivHex}:${ctHex}`;
+  } else if (parts[1] === 'v5') {
+    if (parts.length !== 8) throw new Error('envelope: wrong field count');
+    let kdfSalt, iter, valueSalt;
+    [, , kdfSalt, iter, valueSalt, ivHex, ctHex, macHex] = parts;
+    if (!/^[0-9a-f]{32}$/.test(kdfSalt) || !/^[0-9a-f]{32}$/.test(valueSalt)) throw new Error('envelope: bad salt');
+    if (!/^[0-9]+$/.test(iter) || Number(iter) < 1 || Number(iter) > 10000000) throw new Error('envelope: bad iter');
+    const ikm = (kdfSalt === ctxSalt && Number(iter) === Number(ctxIter))
+      ? envOkm : pbkdf2Okm(passphrase, kdfSalt, iter);
+    const okm = Buffer.from(crypto.hkdfSync('sha256', ikm, Buffer.from(valueSalt, 'hex'), Buffer.from('xenv:v5'), 64));
+    ({ encKey, macKey } = okmKeys(okm));
+    macScope = `v5:${kdfSalt}:${iter}:${valueSalt}:${ivHex}:${ctHex}`;
   } else {
     throw new Error(`envelope: unsupported version ${parts[1]}`);
   }
@@ -156,10 +171,10 @@ function atomicWrite(dest, content) {
 function get(envName, key) {
   const { iter, salt } = readParams(envName);
   const pass = passphrase(envName);
-  const { encKey, macKey } = deriveKeys(pass, salt, iter);
+  const envOkm = pbkdf2Okm(pass, salt, iter);
   const file = path.join(root(), 'envs', envName, key + VALUE_EXT);
   if (!fs.existsSync(file)) throw new Error(`no such key: ${key}`);
-  return decryptEnvelope(fs.readFileSync(file, 'utf8'), pass, encKey, macKey);
+  return decryptEnvelope(fs.readFileSync(file, 'utf8'), pass, salt, iter, envOkm);
 }
 
 function set(envName, key, plaintext) {
@@ -175,14 +190,14 @@ function set(envName, key, plaintext) {
 function load(envName) {
   const { iter, salt } = readParams(envName);
   const pass = passphrase(envName);
-  const { encKey, macKey } = deriveKeys(pass, salt, iter);
+  const envOkm = pbkdf2Okm(pass, salt, iter);   // ONE PBKDF2 for the whole env
   const envDir = path.join(root(), 'envs', envName);
   const out = {};
   for (const file of fs.readdirSync(envDir).sort()) {
     if (!file.endsWith(VALUE_EXT)) continue;
     const key = file.slice(0, -VALUE_EXT.length);
     const envelope = fs.readFileSync(path.join(envDir, file), 'utf8');
-    out[key] = decryptEnvelope(envelope, pass, encKey, macKey);
+    out[key] = decryptEnvelope(envelope, pass, salt, iter, envOkm);
   }
   return out;
 }

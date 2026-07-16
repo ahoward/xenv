@@ -117,14 +117,34 @@ public class Xenv {
     return Arrays.copyOf(dk, dkLen);
   }
 
+  static byte[] pbkdf2Okm(String pass, String saltHex, int iter) throws Exception {
+    return pbkdf2(pass.getBytes(StandardCharsets.UTF_8), hexDecode(saltHex), iter, 64);
+  }
+
   static byte[][] deriveKeys(String pass, String saltHex, int iter) throws Exception {
-    byte[] out = pbkdf2(pass.getBytes(StandardCharsets.UTF_8), hexDecode(saltHex), iter, 64);
+    byte[] out = pbkdf2Okm(pass, saltHex, iter);
     return new byte[][] { Arrays.copyOfRange(out, 0, 32), Arrays.copyOfRange(out, 32, 64) };
   }
 
-  // Dual-read: v3 uses the caller's README-derived keys; v4 is
-  // self-contained — salt/iter come from the envelope.
-  static byte[] decryptEnvelope(String envelope, String passphrase, byte[] v3Enc, byte[] v3Mac) throws Exception {
+  // HKDF-SHA256 (RFC 5869), L=64. Matches the tool's construction.
+  static byte[] hkdf64(byte[] ikm, byte[] salt) throws Exception {
+    byte[] info = "xenv:v5".getBytes(StandardCharsets.US_ASCII);
+    byte[] prk = hmac(salt).doFinal(ikm);
+    Mac m = hmac(prk);
+    m.update(info); m.update((byte) 0x01);
+    byte[] t1 = m.doFinal();
+    m = hmac(prk);
+    m.update(t1); m.update(info); m.update((byte) 0x02);
+    byte[] t2 = m.doFinal();
+    byte[] out = new byte[64];
+    System.arraycopy(t1, 0, out, 0, 32);
+    System.arraycopy(t2, 0, out, 32, 32);
+    return out;
+  }
+
+  // Dual-read v3/v4/v5. Caller precomputes envOkm = PBKDF2 over the env
+  // README salt/iter ONCE; per value it's a slice (v3) or a cheap HKDF (v5).
+  static byte[] decryptEnvelope(String envelope, String passphrase, String ctxSalt, int ctxIter, byte[] envOkm) throws Exception {
     String[] parts = envelope.strip().split(":", -1);
     if (parts.length < 2 || !parts[0].equals("xenv")) throw new RuntimeException("envelope: not xenv");
 
@@ -133,20 +153,31 @@ public class Xenv {
     if (parts[1].equals("v3")) {
       if (parts.length != 5) throw new RuntimeException("envelope: wrong field count");
       ivHex = parts[2]; ctHex = parts[3]; macHex = parts[4];
-      encKey = v3Enc; macKey = v3Mac;
+      encKey = Arrays.copyOfRange(envOkm, 0, 32); macKey = Arrays.copyOfRange(envOkm, 32, 64);
       macScope = "v3:" + ivHex + ":" + ctHex;
     } else if (parts[1].equals("v4")) {
       if (parts.length != 7) throw new RuntimeException("envelope: wrong field count");
       String saltHex = parts[2], iterStr = parts[3];
       ivHex = parts[4]; ctHex = parts[5]; macHex = parts[6];
       if (saltHex.length() != 32) throw new RuntimeException("envelope: bad salt");
-      // iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
       if (!DIGITS.matcher(iterStr).matches()) throw new RuntimeException("envelope: bad iter");
       int iterVal = Integer.parseInt(iterStr);
       if (iterVal < 1 || iterVal > 10_000_000) throw new RuntimeException("envelope: bad iter");
-      byte[][] k = deriveKeys(passphrase, saltHex, iterVal);
-      encKey = k[0]; macKey = k[1];
+      byte[] okm = pbkdf2Okm(passphrase, saltHex, iterVal);
+      encKey = Arrays.copyOfRange(okm, 0, 32); macKey = Arrays.copyOfRange(okm, 32, 64);
       macScope = "v4:" + saltHex + ":" + iterStr + ":" + ivHex + ":" + ctHex;
+    } else if (parts[1].equals("v5")) {
+      if (parts.length != 8) throw new RuntimeException("envelope: wrong field count");
+      String kdfSalt = parts[2], iterStr = parts[3], valueSalt = parts[4];
+      ivHex = parts[5]; ctHex = parts[6]; macHex = parts[7];
+      if (kdfSalt.length() != 32 || valueSalt.length() != 32) throw new RuntimeException("envelope: bad salt");
+      if (!DIGITS.matcher(iterStr).matches()) throw new RuntimeException("envelope: bad iter");
+      int iterVal = Integer.parseInt(iterStr);
+      if (iterVal < 1 || iterVal > 10_000_000) throw new RuntimeException("envelope: bad iter");
+      byte[] ikm = (kdfSalt.equals(ctxSalt) && iterVal == ctxIter) ? envOkm : pbkdf2Okm(passphrase, kdfSalt, iterVal);
+      byte[] okm = hkdf64(ikm, hexDecode(valueSalt));
+      encKey = Arrays.copyOfRange(okm, 0, 32); macKey = Arrays.copyOfRange(okm, 32, 64);
+      macScope = "v5:" + kdfSalt + ":" + iterStr + ":" + valueSalt + ":" + ivHex + ":" + ctHex;
     } else {
       throw new RuntimeException("envelope: unsupported version " + parts[1]);
     }
@@ -190,10 +221,11 @@ public class Xenv {
   static byte[] get(String env, String key) throws Exception {
     Map<String, String> p = readParams(env);
     String pass = passphrase(env);
-    byte[][] keys = deriveKeys(pass, p.get("salt"), Integer.parseInt(p.get("iter")));
+    int iter = Integer.parseInt(p.get("iter"));
+    byte[] envOkm = pbkdf2Okm(pass, p.get("salt"), iter);
     Path file = Path.of(root(), "envs", env, key + VALUE_EXT);
     if (!Files.isRegularFile(file)) throw new RuntimeException("no such key: " + key);
-    return decryptEnvelope(new String(Files.readAllBytes(file), StandardCharsets.US_ASCII), pass, keys[0], keys[1]);
+    return decryptEnvelope(new String(Files.readAllBytes(file), StandardCharsets.US_ASCII), pass, p.get("salt"), iter, envOkm);
   }
 
   static void set(String env, String key, byte[] plaintext) throws Exception {
@@ -211,7 +243,8 @@ public class Xenv {
   static List<String[]> load(String env) throws Exception {
     Map<String, String> p = readParams(env);
     String pass = passphrase(env);
-    byte[][] keys = deriveKeys(pass, p.get("salt"), Integer.parseInt(p.get("iter")));
+    int iter = Integer.parseInt(p.get("iter"));
+    byte[] envOkm = pbkdf2Okm(pass, p.get("salt"), iter);   // ONE PBKDF2 for the env
     Path dir = Path.of(root(), "envs", env);
     List<String[]> names = new ArrayList<>();
     try (var stream = Files.list(dir)) {
@@ -222,7 +255,7 @@ public class Xenv {
     }
     List<String[]> out = new ArrayList<>();
     for (String[] n : names) {
-      byte[] pt = decryptEnvelope(new String(Files.readAllBytes(Path.of(n[1])), StandardCharsets.US_ASCII), pass, keys[0], keys[1]);
+      byte[] pt = decryptEnvelope(new String(Files.readAllBytes(Path.of(n[1])), StandardCharsets.US_ASCII), pass, p.get("salt"), iter, envOkm);
       out.add(new String[] { n[0], new String(pt, StandardCharsets.UTF_8) });
     }
     return out;

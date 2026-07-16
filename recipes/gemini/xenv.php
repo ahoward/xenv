@@ -178,6 +178,23 @@ function decrypt_value(string $envelope, string $passphrase, string $v3Salt, int
         $salt = $saltHex;
         $iter = (int)$iterStr;
         $macData = "v4:{$saltHex}:{$iterStr}:{$ivHex}:{$ctHex}";
+    } elseif ($version === 'v5') {
+        if (count($parts) !== 8) {
+            throw new Exception("Malformed envelope: expected 8 parts, found " . count($parts));
+        }
+        list(, , $kdfSalt, $iterStr, $valueSalt, $ivHex, $ctHex, $macHex) = $parts;
+        if (!preg_match('/^[0-9a-f]{32}$/', $kdfSalt) || !preg_match('/^[0-9a-f]{32}$/', $valueSalt)) {
+            throw new Exception("Invalid v5 salt");
+        }
+        if (!preg_match('/^[0-9]+$/', $iterStr) || (int)$iterStr < 1 || (int)$iterStr > 10000000) {
+            throw new Exception("Invalid v5 iter");
+        }
+        // PBKDF2 once for the env (memoized), then a cheap HKDF per value.
+        $master = pbkdf2_okm($passphrase, $kdfSalt, (int)$iterStr);
+        $okm = hash_hkdf('sha256', $master, 64, 'xenv:v5', hex2bin($valueSalt));
+        $encKey = substr($okm, 0, 32);
+        $macKey = substr($okm, 32, 32);
+        $macData = "v5:{$kdfSalt}:{$iterStr}:{$valueSalt}:{$ivHex}:{$ctHex}";
     } else {
         throw new Exception("Unsupported envelope version: '$version'");
     }
@@ -192,8 +209,10 @@ function decrypt_value(string $envelope, string $passphrase, string $v3Salt, int
         throw new Exception("Invalid MAC length: expected 64 hex chars, got " . strlen($macHex));
     }
 
-    // Derive keys
-    list($encKey, $macKey) = derive_keys($passphrase, $salt, $iter);
+    // Derive keys (v3/v4 slice the PBKDF2 output; v5 already set them via HKDF)
+    if (!isset($encKey)) {
+        list($encKey, $macKey) = derive_keys($passphrase, $salt, $iter);
+    }
 
     // Verify MAC (BEFORE decrypting)
     $expectedMac = hash_hmac('sha256', $macData, $macKey, true);
@@ -240,15 +259,22 @@ function encrypt_value(string $plaintext, string $passphrase, string $salt, int 
     return "xenv:v3:{$ivHex}:{$ctHex}:{$macHex}\n";
 }
 
+// raw 64-byte PBKDF2 output (the env "master"), memoized per (salt,iter)
+// so reading a whole v5 env costs one PBKDF2, not one per value.
+function pbkdf2_okm(string $passphrase, string $saltHex, int $iter): string
+{
+    static $cache = [];
+    $k = $saltHex . ':' . $iter . ':' . substr(hash('sha256', $passphrase), 0, 16);
+    if (!isset($cache[$k])) {
+        $cache[$k] = hash_pbkdf2('sha256', $passphrase, hex2bin($saltHex), $iter, 64, true);
+    }
+    return $cache[$k];
+}
+
 function derive_keys(string $passphrase, string $saltHex, int $iter): array
 {
-    $salt = hex2bin($saltHex);
-    $derivedKey = hash_pbkdf2('sha256', $passphrase, $salt, $iter, 64, true);
-    
-    $encKey = substr($derivedKey, 0, 32);
-    $macKey = substr($derivedKey, 32, 32);
-    
-    return [$encKey, $macKey];
+    $derivedKey = pbkdf2_okm($passphrase, $saltHex, $iter);
+    return [substr($derivedKey, 0, 32), substr($derivedKey, 32, 32)];
 }
 
 function parse_readme(string $envName, string $xenvRoot): array

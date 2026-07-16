@@ -40,7 +40,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.13.2-posix"
+XENV_VERSION="0.14.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
@@ -489,23 +489,135 @@ EOF
     | openssl enc -d -aes-256-cbc -K "$enc_key_hex" -iv "$iv_hex" 2>/dev/null
 }
 
-# decrypt_envelope <passphrase> <v3-enc-hex> <v3-mac-hex> — dual-read
-# dispatcher on the envelope version. v3 values reuse the caller's
-# once-derived env keys (fast); v4 values derive per-value from the
-# salt/iter embedded in the envelope.
-#   stdin:  one envelope line
-#   stdout: plaintext bytes
+# ── v5: two-level KDF (fast + self-contained + per-value keys) ─────
+#
+# xenv:v5:<kdf-salt>:<iter>:<value-salt>:<iv>:<ct>:<mac>
+#
+# ONE expensive PBKDF2 per env (over a shared kdf-salt = the env's README
+# salt), then a CHEAP HKDF-SHA256 per value (over a unique value-salt).
+# Reading a whole env costs one PBKDF2, not one per value — yet every value
+# still has independent keys, and each file stays self-contained (it carries
+# kdf-salt + iter + value-salt, so a lone file decrypts on its own).
+#
+#   master  = PBKDF2-SHA256(passphrase, kdf-salt, iter) → 64 bytes
+#   enc||mac = HKDF-SHA256(salt=value-salt, ikm=master, info="xenv:v5", L=64)
+#   mac      = HMAC-SHA256 over "v5:<kdf-salt>:<iter>:<value-salt>:<iv>:<ct>"
+
+# pbkdf2_okm <passphrase> <salt-hex> <iter> — raw 64-byte PBKDF2 output, hex.
+pbkdf2_okm() {
+  openssl kdf -keylen $((XENV_KEY_BYTES + XENV_MAC_BYTES)) -kdfopt digest:SHA256 \
+    -kdfopt "pass:$1" -kdfopt "hexsalt:$2" -kdfopt "iter:$3" -binary PBKDF2 2>/dev/null \
+    | hex_encode
+}
+
+XENV_HKDF_INFO_HEX=$(printf 'xenv:v5' | od -An -vtx1 | tr -d '[:space:]')
+
+# hkdf_keys <ikm-hex> <salt-hex> — HKDF-SHA256(salt, ikm, info, L=64)
+# → "<enc-hex> <mac-hex>". Three HMAC-SHA256 evaluations, no PBKDF2.
+hkdf_keys() {
+  ikm_hex=$1
+  salt_hex=$2
+  prk=$(printf '%s' "$ikm_hex" | hex_decode \
+    | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$salt_hex" -binary 2>/dev/null | hex_encode)
+  [ -n "$prk" ] || return 1
+  t1=$(printf '%s01' "$XENV_HKDF_INFO_HEX" | hex_decode \
+    | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$prk" -binary 2>/dev/null | hex_encode)
+  t2=$(printf '%s%s02' "$t1" "$XENV_HKDF_INFO_HEX" | hex_decode \
+    | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$prk" -binary 2>/dev/null | hex_encode)
+  [ -n "$t1" ] && [ -n "$t2" ] || return 1
+  printf '%s %s\n' "$t1" "$t2"
+}
+
+# encrypt_v5 <okm-hex> <kdf-salt-hex> <iter>  (stdin: plaintext) → v5 envelope.
+# okm = pbkdf2_okm(passphrase, kdf-salt, iter). A fresh value-salt is minted.
+encrypt_v5() {
+  okm_hex=$1
+  kdf_salt=$2
+  iter=$3
+  value_salt=$(openssl rand -hex "$XENV_SALT_BYTES")
+  read -r e5 m5 <<EOF
+$(hkdf_keys "$okm_hex" "$value_salt")
+EOF
+  [ -n "$e5" ] || { err "key derivation failed"; return 1; }
+
+  iv_hex=$(openssl rand -hex "$XENV_IV_BYTES")
+  ct_hex=$(openssl enc -aes-256-cbc -K "$e5" -iv "$iv_hex" 2>/dev/null | hex_encode)
+  [ -n "$ct_hex" ] || { err "encryption failed"; return 1; }
+
+  mac_input="v5:${kdf_salt}:${iter}:${value_salt}:${iv_hex}:${ct_hex}"
+  mac_hex=$(printf '%s' "$mac_input" \
+    | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$m5" -binary 2>/dev/null | hex_encode)
+  [ -n "$mac_hex" ] || { err "MAC computation failed"; return 1; }
+
+  printf 'xenv:v5:%s:%s:%s:%s:%s:%s\n' "$kdf_salt" "$iter" "$value_salt" "$iv_hex" "$ct_hex" "$mac_hex"
+}
+
+# decrypt_value_v5 <enc-hex> <mac-hex>  (stdin: v5 envelope) → plaintext.
+decrypt_value_v5() {
+  enc_key_hex=$1
+  mac_key_hex=$2
+  envelope=$(cat)
+
+  IFS=: read -r tag ver kdf_salt iter value_salt iv_hex ct_hex mac_hex extra <<EOF
+$envelope
+EOF
+
+  [ "$tag" = "xenv" ]          || { err "not an xenv envelope"; return 1; }
+  [ "$ver" = "v5" ]            || { err "unsupported vault version: $ver"; return 1; }
+  [ -z "$extra" ]              || { err "envelope has extra fields"; return 1; }
+  [ "${#kdf_salt}" -eq 32 ]    || { err "invalid kdf salt length"; return 1; }
+  valid_iter "$iter"           || { err "invalid or out-of-range iter"; return 1; }
+  [ "${#value_salt}" -eq 32 ]  || { err "invalid value salt length"; return 1; }
+  [ "${#iv_hex}" -eq 32 ]      || { err "invalid iv length"; return 1; }
+  [ "${#mac_hex}" -eq 64 ]     || { err "invalid mac length"; return 1; }
+  [ "${#ct_hex}" -gt 0 ] && [ $((${#ct_hex} % 32)) -eq 0 ] \
+                               || { err "invalid ciphertext length"; return 1; }
+  case "$kdf_salt$value_salt$iv_hex$ct_hex$mac_hex" in
+    *[!0-9a-f]*) err "envelope contains non-hex"; return 1 ;;
+  esac
+
+  mac_input="v5:${kdf_salt}:${iter}:${value_salt}:${iv_hex}:${ct_hex}"
+  expected=$(printf '%s' "$mac_input" \
+    | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$mac_key_hex" -binary 2>/dev/null | hex_encode)
+
+  cmp_key=$(openssl rand -hex 32)
+  mac_a=$(printf '%s' "$mac_hex"  | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$cmp_key" -binary 2>/dev/null | hex_encode)
+  mac_b=$(printf '%s' "$expected" | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$cmp_key" -binary 2>/dev/null | hex_encode)
+  [ -n "$mac_a" ] && [ "$mac_a" = "$mac_b" ] || { err "MAC verification failed — wrong key or tampered vault"; return 1; }
+
+  printf '%s' "$ct_hex" | hex_decode \
+    | openssl enc -d -aes-256-cbc -K "$enc_key_hex" -iv "$iv_hex" 2>/dev/null
+}
+
+# split_okm <okm-hex> — echo "<enc-hex> <mac-hex>" (first 32 / last 32 bytes).
+split_okm() {
+  printf '%s' "$1" | awk -v n=$((XENV_KEY_BYTES * 2)) \
+    '{ printf "%s %s\n", substr($0,1,n), substr($0,n+1) }'
+}
+
+# decrypt_envelope <passphrase> <ctx-salt> <ctx-iter> <env-okm-hex> — dual-read
+# dispatcher. The caller precomputes env-okm = pbkdf2_okm(pass, ctx-salt,
+# ctx-iter) ONCE per env; per-value work is then cheap:
+#   v3 → env-okm split into enc/mac (README-salt key model)
+#   v5 → HKDF(env-okm, value-salt) when the kdf-salt matches (the common
+#        case); otherwise PBKDF2 for that envelope's kdf-salt
+#   v4 → PBKDF2 per value (legacy self-contained format; slow but read-only)
+#   stdin: one envelope line   stdout: plaintext bytes
 decrypt_envelope() {
   passphrase=$1
-  v3_enc=$2
-  v3_mac=$3
+  ctx_salt=$2
+  ctx_iter=$3
+  env_okm=$4
   envelope=$(cat)
 
   ver=${envelope#xenv:}
   ver=${ver%%:*}
   case "$ver" in
     v3)
-      printf '%s' "$envelope" | decrypt_value "$v3_enc" "$v3_mac"
+      read -r e3 m3 <<EOF
+$(split_okm "$env_okm")
+EOF
+      printf '%s' "$envelope" | decrypt_value "$e3" "$m3"
       ;;
     v4)
       rest=${envelope#xenv:v4:}
@@ -515,11 +627,35 @@ decrypt_envelope() {
       case "$salt_hex" in ""|*[!0-9a-f]*) err "v4: bad salt"; return 1 ;; esac
       [ "${#salt_hex}" -eq 32 ] || { err "v4: bad salt length"; return 1; }
       valid_iter "$iter" || { err "v4: invalid or out-of-range iter"; return 1; }
+      okm4=$(pbkdf2_okm "$passphrase" "$salt_hex" "$iter")
+      [ -n "$okm4" ] || return 1
       read -r e4 m4 <<EOF
-$(derive_keys "$passphrase" "$salt_hex" "$iter")
+$(split_okm "$okm4")
 EOF
-      [ -n "$e4" ] || return 1
       printf '%s' "$envelope" | decrypt_value_v4 "$e4" "$m4"
+      ;;
+    v5)
+      rest=${envelope#xenv:v5:}
+      kdf_salt=${rest%%:*}
+      rest=${rest#*:}; iter=${rest%%:*}
+      rest=${rest#*:}; value_salt=${rest%%:*}
+      case "$kdf_salt$value_salt" in ""|*[!0-9a-f]*) err "v5: bad salt"; return 1 ;; esac
+      [ "${#kdf_salt}" -eq 32 ] && [ "${#value_salt}" -eq 32 ] \
+        || { err "v5: bad salt length"; return 1; }
+      valid_iter "$iter" || { err "v5: invalid or out-of-range iter"; return 1; }
+      # reuse the precomputed env OKM when the kdf-salt/iter match (common);
+      # else derive for this envelope's own kdf-salt.
+      if [ "$kdf_salt" = "$ctx_salt" ] && [ "$iter" = "$ctx_iter" ]; then
+        ikm=$env_okm
+      else
+        ikm=$(pbkdf2_okm "$passphrase" "$kdf_salt" "$iter")
+      fi
+      [ -n "$ikm" ] || return 1
+      read -r e5 m5 <<EOF
+$(hkdf_keys "$ikm" "$value_salt")
+EOF
+      [ -n "$e5" ] || return 1
+      printf '%s' "$envelope" | decrypt_value_v5 "$e5" "$m5"
       ;;
     *)
       err "unsupported vault version: ${ver:-<none>}"
@@ -528,19 +664,17 @@ EOF
   esac
 }
 
-# load_env_ctx <env> — populate globals $pp (passphrase), $v3_enc, $v3_mac
-# (env keys derived once from the README salt/iter, for any v3 values).
-# Callers then loop: decrypt_envelope "$pp" "$v3_enc" "$v3_mac" < file
+# load_env_ctx <env> — populate globals $pp (passphrase), $ctx_salt,
+# $ctx_iter (env README kdf params) and $env_okm (ONE PBKDF2 for the env).
+# Callers loop: decrypt_envelope "$pp" "$ctx_salt" "$ctx_iter" "$env_okm" < f
 load_env_ctx() {
   env_name=$1
   pp=$(require_key "$env_name") || return 1
   params=$(read_params "$env_name") || return 1
   ctx_iter=${params%% *}
   ctx_salt=${params#* }
-  read -r v3_enc v3_mac <<EOF
-$(derive_keys "$pp" "$ctx_salt" "$ctx_iter")
-EOF
-  [ -n "$v3_enc" ] || return 1
+  env_okm=$(pbkdf2_okm "$pp" "$ctx_salt" "$ctx_iter")
+  [ -n "$env_okm" ] || return 1
 }
 
 # ── per-env directory + params (in README frontmatter) ────────────
@@ -786,11 +920,17 @@ write_value() {
   name=$2
   value=$3
 
-  # writes are v4: a fresh per-value salt is generated and embedded in the
-  # envelope, so the value decrypts without the per-env README frontmatter.
+  # writes are v5: the env's README salt is the shared kdf-salt (embedded in
+  # each envelope, so a value still decrypts standalone), and a fresh
+  # per-value salt gives each value its own HKDF-derived keys. One PBKDF2.
   passphrase=$(require_key "$env_name") || return 1
+  params=$(read_params "$env_name") || return 1
+  kdf_iter=${params%% *}
+  kdf_salt=${params#* }
+  okm=$(pbkdf2_okm "$passphrase" "$kdf_salt" "$kdf_iter")
+  [ -n "$okm" ] || { err "key derivation failed"; return 1; }
 
-  envelope=$(printf '%s' "$value" | encrypt_to_v4 "$passphrase") \
+  envelope=$(printf '%s' "$value" | encrypt_v5 "$okm" "$kdf_salt" "$kdf_iter") \
     || { err "encryption failed — $name unchanged"; return 1; }
   printf '%s\n' "$envelope" | atomic_write "$(value_file "$env_name" "$name")"
 }
@@ -1082,16 +1222,13 @@ verify_passphrase() {
   params=$(read_params "$env_name") || return 1
   iter=${params%% *}
   salt_hex=${params#* }
-  read -r v3_enc v3_mac <<EOF
-$(derive_keys "$passphrase" "$salt_hex" "$iter")
-EOF
-  [ -n "$v3_enc" ] || return 1
+  okm=$(pbkdf2_okm "$passphrase" "$salt_hex" "$iter")
+  [ -n "$okm" ] || return 1
 
-  # dual-read: v3 values verify against the README-derived keys; v4 values
-  # carry their own salt/iter, so decrypt_envelope re-derives per value.
+  # dual-read: v3/v5 verify against the env OKM; v4 re-derives per value.
   for f in "$dir"/*"$XENV_VALUE_EXT"; do
     [ -f "$f" ] || continue
-    decrypt_envelope "$passphrase" "$v3_enc" "$v3_mac" < "$f" >/dev/null 2>&1 && return 0
+    decrypt_envelope "$passphrase" "$salt_hex" "$iter" "$okm" < "$f" >/dev/null 2>&1 && return 0
     return 1   # MAC failed on the first value we tried
   done
   return 2   # no values to verify against
@@ -1597,35 +1734,34 @@ cmd_key_rotate() {
   old_params=$(read_params "$env_name") || exit 1
   old_iter=${old_params%% *}
   old_salt=${old_params#* }
-  read -r old_enc old_mac <<EOF
-$(derive_keys "$old_pass" "$old_salt" "$old_iter")
-EOF
+  old_okm=$(pbkdf2_okm "$old_pass" "$old_salt" "$old_iter")
 
   new_pass=$(openssl rand -base64 32 | tr -d '\n')
   new_salt=$(openssl rand -hex "$XENV_SALT_BYTES")
   new_iter=$XENV_ITER
 
   # decrypt all to a stash first; only re-encrypt if every decrypt succeeded.
-  # old values may be v3 or v4 (dual-read); new values are written as v4.
+  # old values may be v3/v4/v5 (dual-read); new values are written as v5.
   tmp_stash=$(mktemp -d "${TMPDIR:-/tmp}/xenv-rotate.XXXXXXXX") || die "mktemp failed"
   trap 'rm -rf "$tmp_stash"' EXIT INT TERM HUP
 
   for f in "$dir"/*"$XENV_VALUE_EXT"; do
     [ -f "$f" ] || continue
     name=${f##*/}
-    plain=$(decrypt_envelope "$old_pass" "$old_enc" "$old_mac" < "$f") || die "decrypt failed for $name"
+    plain=$(decrypt_envelope "$old_pass" "$old_salt" "$old_iter" "$old_okm" < "$f") || die "decrypt failed for $name"
     printf '%s' "$plain" > "$tmp_stash/$name"
   done
 
-  # refresh the README frontmatter salt/iter (decorative for v4 values, which
-  # embed their own; kept so the README reflects the rotation).
+  # the README salt IS the new env kdf-salt for v5. Rewrite it, then derive
+  # the new env OKM once and re-encrypt every value under it.
   rewrite_frontmatter "$env_name" "$new_iter" "$new_salt" \
     || die "could not rewrite README frontmatter for $env_name"
+  new_okm=$(pbkdf2_okm "$new_pass" "$new_salt" "$new_iter")
 
   for f in "$tmp_stash"/*; do
     [ -f "$f" ] || continue
     name=${f##*/}
-    envelope=$(encrypt_to_v4 "$new_pass" < "$f") \
+    envelope=$(encrypt_v5 "$new_okm" "$new_salt" "$new_iter" < "$f") \
       || die "re-encryption failed for $name"
     printf '%s\n' "$envelope" | atomic_write "$dir/$name" \
       || die "could not write $name"
@@ -1688,20 +1824,18 @@ cmd_key_rotate_global() {
     params=$(read_params "$e") || die "$e: could not read params"
     iter=${params%% *}
     salt=${params#* }
-    read -r enc mac <<EOF
-$(derive_keys "$old_global" "$salt" "$iter")
-EOF
+    okm=$(pbkdf2_okm "$old_global" "$salt" "$iter")
     mkdir -p "$tmp_stash/$e"
     for f in "$dir"/*"$XENV_VALUE_EXT"; do
       [ -f "$f" ] || continue
       name=${f##*/}
-      plain=$(decrypt_envelope "$old_global" "$enc" "$mac" < "$f") \
+      plain=$(decrypt_envelope "$old_global" "$salt" "$iter" "$okm" < "$f") \
         || die "$e: decrypt failed for $name (old _global key wrong?)"
       printf '%s' "$plain" > "$tmp_stash/$e/$name"
     done
   done
 
-  # ── Phase 2: generate new global; re-encrypt every stashed value as v4.
+  # ── Phase 2: generate new global; re-encrypt every stashed value as v5.
   # Only happens after every decrypt above succeeded.
   new_global=$(openssl rand -base64 32 | tr -d '\n')
 
@@ -1709,13 +1843,13 @@ EOF
     dir=$(env_dir "$e")
     new_salt=$(openssl rand -hex "$XENV_SALT_BYTES")
     new_iter=$XENV_ITER
-    # decorative frontmatter refresh (v4 values embed their own salt/iter)
     rewrite_frontmatter "$e" "$new_iter" "$new_salt" \
       || die "could not rewrite frontmatter for $e"
+    new_okm=$(pbkdf2_okm "$new_global" "$new_salt" "$new_iter")
     for f in "$tmp_stash/$e"/*; do
       [ -f "$f" ] || continue
       name=${f##*/}
-      envelope=$(encrypt_to_v4 "$new_global" < "$f") \
+      envelope=$(encrypt_v5 "$new_okm" "$new_salt" "$new_iter" < "$f") \
         || die "$e: re-encryption failed for $name"
       printf '%s\n' "$envelope" | atomic_write "$dir/$name" \
         || die "$e: could not write $name"
@@ -1803,7 +1937,7 @@ cmd_get() {
   tmp=$(mktemp "${TMPDIR:-/tmp}/xenv-get.XXXXXXXX") || die "mktemp failed"
   trap 'rm -f "$tmp"' EXIT INT TERM HUP
 
-  decrypt_envelope "$pp" "$v3_enc" "$v3_mac" < "$f" > "$tmp" || die "decrypt failed"
+  decrypt_envelope "$pp" "$ctx_salt" "$ctx_iter" "$env_okm" < "$f" > "$tmp" || die "decrypt failed"
 
   # interactive terminal: ensure one trailing newline so the next
   # prompt isn't glued to the value. piped / redirected: exact bytes
@@ -1828,7 +1962,7 @@ cmd_edit() {
   trap 'rm -f "$tmp"' EXIT INT TERM HUP
 
   if [ -f "$f" ]; then
-    decrypt_envelope "$pp" "$v3_enc" "$v3_mac" < "$f" > "$tmp" || die "decrypt failed"
+    decrypt_envelope "$pp" "$ctx_salt" "$ctx_iter" "$env_okm" < "$f" > "$tmp" || die "decrypt failed"
   fi
 
   editor=${VISUAL:-${EDITOR:-vi}}
@@ -1842,7 +1976,7 @@ cmd_edit() {
     return 0
   fi
 
-  envelope=$(encrypt_to_v4 "$pp" < "$tmp") \
+  envelope=$(encrypt_v5 "$env_okm" "$ctx_salt" "$ctx_iter" < "$tmp") \
     || die "encryption failed — $name unchanged"
   printf '%s\n' "$envelope" | atomic_write "$f" \
     || die "could not write $f"
@@ -1866,7 +2000,7 @@ cmd_run() {
     # the name becomes a shell var via eval — reject anything that isn't a
     # plain identifier (a crafted filename would otherwise be code execution).
     is_key_name "$name" || die "refusing to export unsafe key name: $name"
-    value=$(decrypt_envelope "$pp" "$v3_enc" "$v3_mac" < "$f") || die "decrypt failed for $name"
+    value=$(decrypt_envelope "$pp" "$ctx_salt" "$ctx_iter" "$env_okm" < "$f") || die "decrypt failed for $name"
     eval "$name=\$value"
     export "$name"
   done
@@ -1894,7 +2028,7 @@ cmd_envdump() {
   for f in "$dir"/*"$XENV_VALUE_EXT"; do
     [ -f "$f" ] || continue
     name=${f##*/}; name=${name%"$XENV_VALUE_EXT"}
-    value=$(decrypt_envelope "$pp" "$v3_enc" "$v3_mac" < "$f") || die "decrypt failed for $name"
+    value=$(decrypt_envelope "$pp" "$ctx_salt" "$ctx_iter" "$env_okm" < "$f") || die "decrypt failed for $name"
     printf '%s=%s\n' "$name" "$value"
   done
 }
@@ -1931,7 +2065,7 @@ cmd_envdump_json() {
   for f in "$dir"/*"$XENV_VALUE_EXT"; do
     [ -f "$f" ] || continue
     name=${f##*/}; name=${name%"$XENV_VALUE_EXT"}
-    decrypt_envelope "$pp" "$v3_enc" "$v3_mac" < "$f" > "$tmp" || die "decrypt failed for $name"
+    decrypt_envelope "$pp" "$ctx_salt" "$ctx_iter" "$env_okm" < "$f" > "$tmp" || die "decrypt failed for $name"
     [ "$first" -eq 1 ] || printf ','
     first=0
     printf '%s:%s' "$(printf '%s' "$name" | json_string)" "$(json_string < "$tmp")"

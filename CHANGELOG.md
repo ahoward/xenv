@@ -7,6 +7,36 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.14.0-posix] — 2026-07-16
+
+Make xenv fast without giving up self-contained envelopes: a two-level KDF
+(v5) pays PBKDF2 once per env, then a cheap HKDF per value.
+
+### Added
+
+- **v5 envelope — two-level KDF (new write default).** Format
+  `xenv:v5:<kdf-salt>:<iter>:<value-salt>:<iv>:<ct>:<mac>`. A per-env master
+  is derived with PBKDF2 over the shared `kdf-salt` (the env README `salt`);
+  each value's enc/mac keys come from HKDF-SHA256 over that master keyed by a
+  unique per-value salt (`info="xenv:v5"`). Self-contained like v4, unique
+  per-value keys like v4, but PBKDF2 runs **once per env** instead of once
+  per value.
+- v5 conformance vectors in `recipes/vectors/` (5 ok + 1 tamper), verified by
+  `verify.rb` and `verify.js`; a `V5_DEMO` value in the demo vault plus a
+  `recipes/test` assertion that every loader reads it.
+
+### Changed
+
+- **Writes are now v5** (`set`, `edit`, key rotation). Reads still dual-read
+  **v3, v4, and v5** — existing vaults keep working untouched.
+- All native loaders (Ruby, Python, Node, Go, Rust, PHP, Java, C#, Elixir)
+  read v5 and amortize: PBKDF2 once per `load`, HKDF per value.
+
+### Performance
+
+- `--json` / `load` over 11 values: **~2.4s → ~0.8s** (~3×). The remaining
+  cost is shell fork overhead per value, not the KDF.
+
 ## [0.13.2-posix] — 2026-07-16
 
 ### Docs

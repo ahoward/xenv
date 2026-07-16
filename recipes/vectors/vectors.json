@@ -159,6 +159,61 @@
       "envelope": "xenv:v4:e048f5c56c21d385beb54a63ddc84f68:999999999:87a863d8c1eae6c30a5ab870ed6c38e7:f7e00b57d22ff38cd6a60fa44ecb04c7:d37750d048d652e19f85b62c60075762e32ccb784eae307701ed35c25600fcc1",
       "expect": "mac_fail",
       "note": "iter far above the DoS ceiling; a conformant reader MUST reject before running PBKDF2"
+    },
+    {
+      "name": "v5_hello",
+      "wire": "v5",
+      "env": "production",
+      "key": "V5_HELLO",
+      "iter": 200000,
+      "salt": "b4ac4b98ba11d56fd4475821bec0a294",
+      "envelope": "xenv:v5:b4ac4b98ba11d56fd4475821bec0a294:200000:c88807fe205d1e42292c70ce1fbb4b17:63d2ddeb4487c27f0111333954a62459:964cf2013138477e6dc6ea0fbaea0808:d3dcbf17af03ead371b830e90bfac1dbb5a6e27fdfc6da5e3579e56a2b777665",
+      "plaintext_b64": "d29ybGQ=",
+      "expect": "ok"
+    },
+    {
+      "name": "v5_multi",
+      "wire": "v5",
+      "env": "production",
+      "key": "V5_MULTI",
+      "iter": 200000,
+      "salt": "b4ac4b98ba11d56fd4475821bec0a294",
+      "envelope": "xenv:v5:b4ac4b98ba11d56fd4475821bec0a294:200000:3e62539394e4fa866635f74e0f403158:f455500b3c74d8bd790dc55e48b3026a:55626b02de64c826188f2785129afe76:1b703c1304b88a5b6fdb14406bc2a6f0848a8d636bdd460edaf72b1e77ade22c",
+      "plaintext_b64": "bDEKbDIJdGFi",
+      "expect": "ok"
+    },
+    {
+      "name": "v5_unicode",
+      "wire": "v5",
+      "env": "production",
+      "key": "V5_UNICODE",
+      "iter": 200000,
+      "salt": "b4ac4b98ba11d56fd4475821bec0a294",
+      "envelope": "xenv:v5:b4ac4b98ba11d56fd4475821bec0a294:200000:3c44a044c10bb2238ad59f69b779dc11:ada7296f8c4fa4ea9b269f2cd36b58c3:94316cd1f1aa8e409f7fd85ddda4cebc66886fe782c9bafd1ebe3509aa416600:625e82eea55f155342422a3f14350a99e99917ab347ad945eacd6f84100b124a",
+      "plaintext_b64": "Y2Fmw6kg4piVIOaXpeacrOiqng==",
+      "expect": "ok"
+    },
+    {
+      "name": "v5_empty",
+      "wire": "v5",
+      "env": "production",
+      "key": "V5_EMPTY",
+      "iter": 200000,
+      "salt": "b4ac4b98ba11d56fd4475821bec0a294",
+      "envelope": "xenv:v5:b4ac4b98ba11d56fd4475821bec0a294:200000:e5630b5f213a07959ea3b632b1d89f16:ae270c9f6ae77a8747508de529affedf:00a417d57e02e9269cfb0bcc6f01a72e:9c243cbe93b09d1bef3da78963f4b5b2827775331dd3e447421469e519ad7214",
+      "plaintext_b64": "",
+      "expect": "ok"
+    },
+    {
+      "name": "tampered-v5-hello",
+      "wire": "v5",
+      "env": "production",
+      "key": "V5_HELLO",
+      "iter": 200000,
+      "salt": "b4ac4b98ba11d56fd4475821bec0a294",
+      "envelope": "xenv:v5:b4ac4b98ba11d56fd4475821bec0a294:200000:c88807fe205d1e42292c70ce1fbb4b17:63d2ddeb4487c27f0111333954a62459:f64cf2013138477e6dc6ea0fbaea0808:d3dcbf17af03ead371b830e90bfac1dbb5a6e27fdfc6da5e3579e56a2b777665",
+      "expect": "mac_fail",
+      "note": "v5 ciphertext with one nibble flipped; MUST fail MAC"
     }
   ]
 }

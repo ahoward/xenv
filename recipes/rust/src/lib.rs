@@ -176,9 +176,15 @@ fn random_bytes(n: usize) -> Result<Vec<u8>, Error> {
     Ok(buf)
 }
 
-fn derive_keys(pass: &str, salt: &[u8], iter: u32) -> ([u8; 32], [u8; 32]) {
+// raw 64-byte PBKDF2 output (the env "master").
+fn pbkdf2_okm(pass: &str, salt: &[u8], iter: u32) -> [u8; 64] {
     let mut out = [0u8; 64];
     pbkdf2_hmac::<Sha256>(pass.as_bytes(), salt, iter, &mut out);
+    out
+}
+
+fn derive_keys(pass: &str, salt: &[u8], iter: u32) -> ([u8; 32], [u8; 32]) {
+    let out = pbkdf2_okm(pass, salt, iter);
     let mut enc = [0u8; 32];
     let mut mac = [0u8; 32];
     enc.copy_from_slice(&out[..32]);
@@ -186,13 +192,43 @@ fn derive_keys(pass: &str, salt: &[u8], iter: u32) -> ([u8; 32], [u8; 32]) {
     (enc, mac)
 }
 
+// HKDF-SHA256 (RFC 5869), L=64. Matches the tool's construction.
+fn hkdf64(ikm: &[u8], salt: &[u8]) -> [u8; 64] {
+    let info = b"xenv:v5";
+    let mut e = <HmacSha256 as Mac>::new_from_slice(salt).unwrap();
+    e.update(ikm);
+    let prk = e.finalize().into_bytes();
+    let mut m1 = <HmacSha256 as Mac>::new_from_slice(&prk).unwrap();
+    m1.update(info);
+    m1.update(&[0x01]);
+    let t1 = m1.finalize().into_bytes();
+    let mut m2 = <HmacSha256 as Mac>::new_from_slice(&prk).unwrap();
+    m2.update(&t1);
+    m2.update(info);
+    m2.update(&[0x02]);
+    let t2 = m2.finalize().into_bytes();
+    let mut out = [0u8; 64];
+    out[..32].copy_from_slice(&t1);
+    out[32..].copy_from_slice(&t2);
+    out
+}
+
+fn okm_keys(okm: &[u8; 64]) -> ([u8; 32], [u8; 32]) {
+    let mut e = [0u8; 32];
+    let mut m = [0u8; 32];
+    e.copy_from_slice(&okm[..32]);
+    m.copy_from_slice(&okm[32..]);
+    (e, m)
+}
+
 // Dual-read: v3 uses the caller's README-derived keys; v4 is
 // self-contained — salt/iter come from the envelope.
 fn decrypt_envelope(
     envelope: &str,
     passphrase: &str,
-    v3_enc: &[u8; 32],
-    v3_mac: &[u8; 32],
+    ctx_salt: &str,
+    ctx_iter: u32,
+    env_okm: &[u8; 64],
 ) -> Result<Vec<u8>, Error> {
     let parts: Vec<&str> = envelope.trim().split(':').collect();
     if parts.len() < 2 || parts[0] != "xenv" {
@@ -212,9 +248,10 @@ fn decrypt_envelope(
             if parts.len() != 5 {
                 return Err(Error::Format("envelope: wrong field count".into()));
             }
+            let (e, m) = okm_keys(env_okm);
             (
-                *v3_enc,
-                *v3_mac,
+                e,
+                m,
                 parts[2],
                 parts[3],
                 parts[4],
@@ -246,6 +283,42 @@ fn decrypt_envelope(
                 parts[5],
                 parts[6],
                 format!("v4:{}:{}:{}:{}", salt_hex, parts[3], parts[4], parts[5]),
+            )
+        }
+        "v5" => {
+            if parts.len() != 8 {
+                return Err(Error::Format("envelope: wrong field count".into()));
+            }
+            let kdf_salt = parts[2];
+            let value_salt = parts[4];
+            if kdf_salt.len() != 32 || value_salt.len() != 32 {
+                return Err(Error::Format("envelope: bad salt".into()));
+            }
+            let iter: u32 = parts[3]
+                .parse()
+                .map_err(|_| Error::Format("envelope: bad iter".into()))?;
+            if !(1..=10_000_000).contains(&iter) {
+                return Err(Error::Format("envelope: bad iter".into()));
+            }
+            let derived;
+            let ikm: &[u8] = if kdf_salt == ctx_salt && iter == ctx_iter {
+                &env_okm[..]
+            } else {
+                let ks = hex_decode(kdf_salt)
+                    .ok_or_else(|| Error::Format("non-hex salt".into()))?;
+                derived = pbkdf2_okm(passphrase, &ks, iter);
+                &derived[..]
+            };
+            let vs = hex_decode(value_salt)
+                .ok_or_else(|| Error::Format("non-hex salt".into()))?;
+            let (e, m) = okm_keys(&hkdf64(ikm, &vs));
+            (
+                e,
+                m,
+                parts[5],
+                parts[6],
+                parts[7],
+                format!("v5:{}:{}:{}:{}:{}", kdf_salt, parts[3], value_salt, parts[5], parts[6]),
             )
         }
         other => {
@@ -334,7 +407,8 @@ fn atomic_write(dest: &Path, content: &str) -> Result<(), Error> {
 pub fn get(env_name: &str, key: &str) -> Result<Vec<u8>, Error> {
     let p = read_params(env_name)?;
     let pass = passphrase(env_name)?;
-    let (enc_key, mac_key) = derive_keys(&pass, &p.salt, p.iter);
+    let salt_hex = hex_encode(&p.salt);
+    let env_okm = pbkdf2_okm(&pass, &p.salt, p.iter);
 
     let file = root()
         .join("envs")
@@ -344,7 +418,7 @@ pub fn get(env_name: &str, key: &str) -> Result<Vec<u8>, Error> {
         return Err(Error::NotFound(format!("no such key: {key}")));
     }
     let envelope = fs::read_to_string(&file)?;
-    decrypt_envelope(&envelope, &pass, &enc_key, &mac_key)
+    decrypt_envelope(&envelope, &pass, &salt_hex, p.iter, &env_okm)
 }
 
 /// Encrypt plaintext and atomically write it.
@@ -368,7 +442,8 @@ pub fn set(env_name: &str, key: &str, plaintext: &[u8]) -> Result<(), Error> {
 pub fn load(env_name: &str) -> Result<BTreeMap<String, Vec<u8>>, Error> {
     let p = read_params(env_name)?;
     let pass = passphrase(env_name)?;
-    let (enc_key, mac_key) = derive_keys(&pass, &p.salt, p.iter);
+    let salt_hex = hex_encode(&p.salt);
+    let env_okm = pbkdf2_okm(&pass, &p.salt, p.iter); // ONE PBKDF2 for the env
 
     let env_dir = root().join("envs").join(env_name);
     let mut out = BTreeMap::new();
@@ -380,7 +455,7 @@ pub fn load(env_name: &str) -> Result<BTreeMap<String, Vec<u8>>, Error> {
         }
         let key = name[..name.len() - VALUE_EXT.len()].to_string();
         let envelope = fs::read_to_string(entry.path())?;
-        out.insert(key, decrypt_envelope(&envelope, &pass, &enc_key, &mac_key)?);
+        out.insert(key, decrypt_envelope(&envelope, &pass, &salt_hex, p.iter, &env_okm)?);
     }
     Ok(out)
 }

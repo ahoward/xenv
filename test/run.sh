@@ -405,11 +405,11 @@ test_init_frontmatter_params() {
   grep -q "xenv/production" "$rf" || return 1
 }
 
-test_init_value_files_are_v4_envelopes() {
-  # writes are v4 (self-contained: salt + iter embedded per value).
+test_init_value_files_are_v5_envelopes() {
+  # writes are v5 (two-level KDF: shared kdf-salt + per-value salt embedded).
   xenv setup testing development staging production >/dev/null 2>&1
   case "$(cat xenv/envs/development/APP_ENV.value.enc)" in
-    "xenv:v4:"*) return 0 ;;
+    "xenv:v5:"*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -945,14 +945,14 @@ test_env_var_beats_file_backend() {
 test_tampered_ciphertext_rejected() {
   xenv setup testing development staging production >/dev/null 2>&1
   orig=$(cat xenv/envs/production/APP_ENV.value.enc)
-  # v4 layout: xenv:v4:<salt>:<iter>:<iv>:<ct>:<mac>
-  IFS=: read -r tag ver salt iter iv ct mac <<EOF
+  # v5 layout: xenv:v5:<kdf-salt>:<iter>:<value-salt>:<iv>:<ct>:<mac>
+  IFS=: read -r tag ver ksalt iter vsalt iv ct mac <<EOF
 $orig
 EOF
   first=$(printf '%s' "$ct" | cut -c1)
   rest=$(printf '%s' "$ct" | cut -c2-)
   if [ "$first" = "f" ]; then mut="0$rest"; else mut="f$rest"; fi
-  printf 'xenv:v4:%s:%s:%s:%s:%s\n' "$salt" "$iter" "$iv" "$mut" "$mac" > xenv/envs/production/APP_ENV.value.enc
+  printf 'xenv:v5:%s:%s:%s:%s:%s:%s\n' "$ksalt" "$iter" "$vsalt" "$iv" "$mut" "$mac" > xenv/envs/production/APP_ENV.value.enc
 
   out=$(xenv get @production APP_ENV 2>&1) && return 1
   echo "$out" | grep -qi "MAC verification" || return 1
@@ -1235,7 +1235,7 @@ run_test "two same-basename projects → unique ids"  test_two_projects_same_bas
 run_test "weird basename gets sanitized"            test_basename_sanitization
 run_test "no xenv/README.md → key lookup fails"     test_no_top_readme_means_no_key_lookup
 run_test "init writes KDF params in README frontmatter"  test_init_frontmatter_params
-run_test "init value files are v4 envelopes"        test_init_value_files_are_v4_envelopes
+run_test "init value files are v5 envelopes"        test_init_value_files_are_v5_envelopes
 run_test "tool dual-reads a v3 envelope"            test_dual_read_v3_envelope
 run_test "init bin/xenv is self-contained"          test_init_bin_xenv_is_self_contained
 

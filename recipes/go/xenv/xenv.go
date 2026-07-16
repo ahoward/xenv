@@ -17,11 +17,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -106,18 +108,26 @@ func readParams(envName string) (*params, error) {
 	return &params{iter: iter, salt: salt}, nil
 }
 
-func deriveKeys(pass, saltHex string, iter int) (encKey, macKey []byte, err error) {
+// pbkdf2Okm returns the raw 64-byte PBKDF2 output (the env "master").
+func pbkdf2Okm(pass, saltHex string, iter int) ([]byte, error) {
 	salt, err := hex.DecodeString(saltHex)
+	if err != nil {
+		return nil, err
+	}
+	return pbkdf2.Key([]byte(pass), salt, iter, 64, sha256.New), nil
+}
+
+func deriveKeys(pass, saltHex string, iter int) (encKey, macKey []byte, err error) {
+	okm, err := pbkdf2Okm(pass, saltHex, iter)
 	if err != nil {
 		return nil, nil, err
 	}
-	derived := pbkdf2.Key([]byte(pass), salt, iter, 64, sha256.New)
-	return derived[:32], derived[32:], nil
+	return okm[:32], okm[32:], nil
 }
 
-// Dual-read: v3 uses the caller's README-derived keys; v4 is
-// self-contained — salt/iter come from the envelope.
-func decryptEnvelope(envelope, passphrase string, v3Enc, v3Mac []byte) ([]byte, error) {
+// Dual-read v3/v4/v5. Caller precomputes envOkm = PBKDF2 over the env
+// README salt/iter ONCE; per value it's a slice (v3) or a cheap HKDF (v5).
+func decryptEnvelope(envelope, passphrase, ctxSalt string, ctxIter int, envOkm []byte) ([]byte, error) {
 	parts := strings.Split(strings.TrimSpace(envelope), ":")
 	if len(parts) < 2 || parts[0] != "xenv" {
 		return nil, errors.New("envelope: not xenv")
@@ -131,7 +141,7 @@ func decryptEnvelope(envelope, passphrase string, v3Enc, v3Mac []byte) ([]byte, 
 			return nil, errors.New("envelope: wrong field count")
 		}
 		ivHex, ctHex, macHex = parts[2], parts[3], parts[4]
-		encKey, macKey = v3Enc, v3Mac
+		encKey, macKey = envOkm[:32], envOkm[32:]
 		macScope = fmt.Sprintf("v3:%s:%s", ivHex, ctHex)
 	case "v4":
 		if len(parts) != 7 {
@@ -142,16 +152,45 @@ func decryptEnvelope(envelope, passphrase string, v3Enc, v3Mac []byte) ([]byte, 
 		if len(saltHex) != 32 {
 			return nil, errors.New("envelope: bad salt")
 		}
-		// iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
 		iter, err := strconv.Atoi(iterStr)
 		if err != nil || iter < 1 || iter > 10_000_000 {
 			return nil, errors.New("envelope: bad iter")
 		}
-		encKey, macKey, err = deriveKeys(passphrase, saltHex, iter)
+		okm, err := pbkdf2Okm(passphrase, saltHex, iter)
 		if err != nil {
 			return nil, err
 		}
+		encKey, macKey = okm[:32], okm[32:]
 		macScope = fmt.Sprintf("v4:%s:%s:%s:%s", saltHex, iterStr, ivHex, ctHex)
+	case "v5":
+		if len(parts) != 8 {
+			return nil, errors.New("envelope: wrong field count")
+		}
+		kdfSalt, iterStr, valueSalt := parts[2], parts[3], parts[4]
+		ivHex, ctHex, macHex = parts[5], parts[6], parts[7]
+		if len(kdfSalt) != 32 || len(valueSalt) != 32 {
+			return nil, errors.New("envelope: bad salt")
+		}
+		iter, err := strconv.Atoi(iterStr)
+		if err != nil || iter < 1 || iter > 10_000_000 {
+			return nil, errors.New("envelope: bad iter")
+		}
+		ikm := envOkm
+		if kdfSalt != ctxSalt || iter != ctxIter {
+			if ikm, err = pbkdf2Okm(passphrase, kdfSalt, iter); err != nil {
+				return nil, err
+			}
+		}
+		vs, err := hex.DecodeString(valueSalt)
+		if err != nil {
+			return nil, errors.New("envelope: non-hex salt")
+		}
+		okm := make([]byte, 64)
+		if _, err := io.ReadFull(hkdf.New(sha256.New, ikm, vs, []byte("xenv:v5")), okm); err != nil {
+			return nil, err
+		}
+		encKey, macKey = okm[:32], okm[32:]
+		macScope = fmt.Sprintf("v5:%s:%s:%s:%s:%s", kdfSalt, iterStr, valueSalt, ivHex, ctHex)
 	default:
 		return nil, fmt.Errorf("envelope: unsupported version %s", parts[1])
 	}
@@ -261,7 +300,7 @@ func Get(envName, key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	encKey, macKey, err := deriveKeys(pass, p.salt, p.iter)
+	envOkm, err := pbkdf2Okm(pass, p.salt, p.iter)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +309,7 @@ func Get(envName, key string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("no such key: %s", key)
 	}
-	return decryptEnvelope(string(data), pass, encKey, macKey)
+	return decryptEnvelope(string(data), pass, p.salt, p.iter, envOkm)
 }
 
 // Set encrypts plaintext and atomically writes it.
@@ -309,7 +348,7 @@ func Load(envName string) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	encKey, macKey, err := deriveKeys(pass, p.salt, p.iter)
+	envOkm, err := pbkdf2Okm(pass, p.salt, p.iter)
 	if err != nil {
 		return nil, err
 	}
@@ -328,7 +367,7 @@ func Load(envName string) (map[string][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		plain, err := decryptEnvelope(string(data), pass, encKey, macKey)
+		plain, err := decryptEnvelope(string(data), pass, p.salt, p.iter, envOkm)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}

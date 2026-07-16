@@ -86,15 +86,34 @@ defmodule Xenv do
     end
   end
 
+  # raw 64-byte PBKDF2 output (the env "master").
+  def pbkdf2_okm(pass, salt_hex, iter) do
+    :crypto.pbkdf2_hmac(:sha256, pass, Base.decode16!(salt_hex, case: :lower), iter, 64)
+  end
+
   def derive_keys(pass, salt_hex, iter) do
-    salt = Base.decode16!(salt_hex, case: :lower)
-    <<enc::binary-size(32), mac::binary-size(32)>> = :crypto.pbkdf2_hmac(:sha256, pass, salt, iter, 64)
+    <<enc::binary-size(32), mac::binary-size(32)>> = pbkdf2_okm(pass, salt_hex, iter)
     {enc, mac}
   end
 
-  # Dual-read: v3 uses the caller's README-derived keys; v4 is
-  # self-contained — salt/iter come from the envelope.
-  def decrypt_envelope(envelope, passphrase, v3_enc, v3_mac) do
+  # HKDF-SHA256 (RFC 5869), L=64. Matches the tool's construction.
+  def hkdf64(ikm, salt) do
+    info = "xenv:v5"
+    prk = :crypto.mac(:hmac, :sha256, salt, ikm)
+    t1 = :crypto.mac(:hmac, :sha256, prk, info <> <<1>>)
+    t2 = :crypto.mac(:hmac, :sha256, prk, t1 <> info <> <<2>>)
+    t1 <> t2
+  end
+
+  defp okm_keys(okm) do
+    <<enc::binary-size(32), mac::binary-size(32)>> = okm
+    {enc, mac}
+  end
+
+  # Dual-read v3/v4/v5. Caller precomputes env_okm = PBKDF2 over the env
+  # README salt/iter ONCE; per value it's a slice (v3), a per-value PBKDF2
+  # (v4), or a cheap HKDF over the shared master (v5).
+  def decrypt_envelope(envelope, passphrase, ctx_salt, ctx_iter, env_okm) do
     parts = envelope |> String.trim() |> String.split(":")
     unless List.first(parts) == "xenv", do: raise("envelope: not xenv")
 
@@ -103,18 +122,30 @@ defmodule Xenv do
         "v3" ->
           unless length(parts) == 5, do: raise("envelope: wrong field count")
           [_, _, iv, ct, mac] = parts
-          {v3_enc, v3_mac, iv, ct, mac, "v3:#{iv}:#{ct}"}
+          {e, m} = okm_keys(env_okm)
+          {e, m, iv, ct, mac, "v3:#{iv}:#{ct}"}
 
         "v4" ->
           unless length(parts) == 7, do: raise("envelope: wrong field count")
           [_, _, salt, it, iv, ct, mac] = parts
           unless Regex.match?(~r/\A[0-9a-f]{32}\z/, salt), do: raise("envelope: bad salt")
-          # iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
           unless Regex.match?(~r/\A[0-9]+\z/, it), do: raise("envelope: bad iter")
           iter = String.to_integer(it)
           unless iter >= 1 and iter <= 10_000_000, do: raise("envelope: bad iter")
           {e, m} = derive_keys(passphrase, salt, iter)
           {e, m, iv, ct, mac, "v4:#{salt}:#{it}:#{iv}:#{ct}"}
+
+        "v5" ->
+          unless length(parts) == 8, do: raise("envelope: wrong field count")
+          [_, _, kdf_salt, it, value_salt, iv, ct, mac] = parts
+          unless Regex.match?(~r/\A[0-9a-f]{32}\z/, kdf_salt) and Regex.match?(~r/\A[0-9a-f]{32}\z/, value_salt),
+            do: raise("envelope: bad salt")
+          unless Regex.match?(~r/\A[0-9]+\z/, it), do: raise("envelope: bad iter")
+          iter = String.to_integer(it)
+          unless iter >= 1 and iter <= 10_000_000, do: raise("envelope: bad iter")
+          ikm = if kdf_salt == ctx_salt and iter == ctx_iter, do: env_okm, else: pbkdf2_okm(passphrase, kdf_salt, iter)
+          {e, m} = okm_keys(hkdf64(ikm, Base.decode16!(value_salt, case: :lower)))
+          {e, m, iv, ct, mac, "v5:#{kdf_salt}:#{it}:#{value_salt}:#{iv}:#{ct}"}
 
         other ->
           raise("envelope: unsupported version #{other}")
@@ -173,10 +204,10 @@ defmodule Xenv do
   def get(env, key) do
     {iter, salt} = read_params(env)
     pass = passphrase(env)
-    {enc, mac} = derive_keys(pass, salt, iter)
+    env_okm = pbkdf2_okm(pass, salt, iter)
     file = Path.join([root(), "envs", env, key <> @value_ext])
     unless File.exists?(file), do: raise("no such key: #{key}")
-    decrypt_envelope(File.read!(file), pass, enc, mac)
+    decrypt_envelope(File.read!(file), pass, salt, iter, env_okm)
   end
 
   def set(env, key, plaintext) do
@@ -194,7 +225,7 @@ defmodule Xenv do
   def load(env) do
     {iter, salt} = read_params(env)
     pass = passphrase(env)
-    {enc, mac} = derive_keys(pass, salt, iter)
+    env_okm = pbkdf2_okm(pass, salt, iter)
     dir = Path.join([root(), "envs", env])
 
     dir
@@ -203,7 +234,7 @@ defmodule Xenv do
     |> Enum.filter(&String.ends_with?(&1, @value_ext))
     |> Enum.map(fn f ->
       key = String.slice(f, 0, String.length(f) - String.length(@value_ext))
-      {key, decrypt_envelope(File.read!(Path.join(dir, f)), pass, enc, mac)}
+      {key, decrypt_envelope(File.read!(Path.join(dir, f)), pass, salt, iter, env_okm)}
     end)
   end
 end

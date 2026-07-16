@@ -235,12 +235,11 @@ Use a CSPRNG for the IV (`os.urandom` in Python, `crypto.randomBytes` in Node, `
 
 Atomicity matters: write the new envelope to a temp file, then `rename(2)` it into place. POSIX rename is atomic on the same filesystem. Don't write to the destination file directly — a crash mid-write would corrupt the value.
 
-## the v4 envelope — self-contained (target format)
+## the v4 envelope — self-contained
 
-> **Status: specified, not yet the default. Tracked in issue #12.** v3 stays
-> fully supported; a conformant reader accepts **both** v3 and v4. Writers
-> emit v4 for new values once implemented (#13); `xenv migrate` (#14)
-> re-encrypts existing v3 values to v4 in place.
+> **Status: shipped, readable, not the write default.** A conformant reader
+> accepts v3, v4, **and** v5. The shell tool no longer writes v4 (v5 is the
+> current write default, below); v4 remains fully supported on read.
 
 v3 keeps the KDF `salt` and `iter` in the per-env `README.md` frontmatter.
 That couples a value to its directory: copy a lone `.value.enc` somewhere
@@ -290,26 +289,85 @@ iterations feed both the derived key **and** the MAC scope, tampering either
 fails verification two ways over. Verify the MAC **before** decrypting, same
 as v3.
 
-### reading both versions (dual-read)
+## the v5 envelope — two-level KDF (current write default)
+
+> **Status: the default the shell tool writes.** A conformant reader accepts
+> v3, v4, and v5. New values are v5.
+
+v4 is self-contained but pays a full PBKDF2 **per value** — a `load` over N
+variables runs PBKDF2 N times. v5 keeps v4's self-containment while paying
+PBKDF2 **once per env**: it derives a per-env master with PBKDF2, then a
+cheap per-value key with HKDF. A `load` over 11 values drops from ~2.4s to
+~0.8s, and the derived key is still unique per value.
+
+```
+xenv:v5:<kdf-salt-hex>:<iter>:<value-salt-hex>:<iv-hex>:<ct-hex>:<mac-hex>
+```
+
+Eight colon-separated fields. Validate:
+
+- `xenv` is literally `xenv`; `v5` is literally `v5`.
+- `<kdf-salt-hex>` — exactly 32 hex chars (16-byte PBKDF2 salt). Shared by every value in an env (it is the env's README `salt`), which is what lets a loader run PBKDF2 once and reuse the master.
+- `<iter>` — PBKDF2 iteration count; `^[0-9]+$`. Same DoS bound as v4: a conformant reader MUST enforce `1 ≤ iter ≤ 10_000_000` **before** running the KDF.
+- `<value-salt-hex>` — exactly 32 hex chars (16-byte HKDF salt), **unique per value** (fresh random on every write).
+- `<iv-hex>` — exactly 32 hex chars (16-byte AES IV).
+- `<ct-hex>` — a positive multiple of 32 hex chars (CBC block-aligned).
+- `<mac-hex>` — exactly 64 hex chars (32-byte HMAC-SHA256).
+- Reject any envelope with more or fewer than these eight fields.
+
+### key derivation (v5)
+
+Two levels. The master is PBKDF2 over the shared `kdf-salt`; the per-value
+key is HKDF-SHA256 (RFC 5869) over that master, keyed by the unique
+`value-salt` with a fixed `info`:
+
+```
+master             = PBKDF2-SHA256(passphrase, hex_decode(kdf-salt), iter, dkLen=64)
+enc-key ‖ mac-key  = HKDF-SHA256(ikm=master, salt=hex_decode(value-salt), info="xenv:v5", L=64)
+first 32 bytes = enc-key,  last 32 bytes = mac-key
+```
+
+`info` is the literal ASCII string `xenv:v5`. A loader amortizes by
+computing `master` once for the env (the `kdf-salt` is constant across its
+values) and running only HKDF per value. Any stdlib HKDF-SHA256 interoperates
+— the construction is plain RFC 5869 (`PRK = HMAC(salt, ikm)`; `T(1) =
+HMAC(PRK, info‖0x01)`; `T(2) = HMAC(PRK, T(1)‖info‖0x02)`; `OKM = T(1)‖T(2)`).
+
+### MAC scope (v5)
+
+Encrypt-then-MAC over every parameter affecting decryption:
+
+```
+MAC = HMAC-SHA256(mac-key, "v5:<kdf-salt-hex>:<iter>:<value-salt-hex>:<iv-hex>:<ct-hex>")
+```
+
+Literal ASCII, same field order, lowercase hex, `<iter>` in decimal exactly
+as written. Verify **before** decrypting, same as v3/v4.
+
+### reading all versions (dual-read)
 
 Dispatch on the second field:
 
-| version | salt / iter source | MAC scope |
-|---------|--------------------|-----------|
-| `v3`    | sibling `README.md` frontmatter | `v3:<iv>:<ct>` |
-| `v4`    | the envelope itself             | `v4:<salt>:<iter>:<iv>:<ct>` |
+| version | key derivation | salt / iter source | MAC scope |
+|---------|----------------|--------------------|-----------|
+| `v3`    | PBKDF2 → split | sibling `README.md` frontmatter | `v3:<iv>:<ct>` |
+| `v4`    | PBKDF2 → split | the envelope itself             | `v4:<salt>:<iter>:<iv>:<ct>` |
+| `v5`    | PBKDF2 → HKDF  | the envelope itself             | `v5:<kdf-salt>:<iter>:<value-salt>:<iv>:<ct>` |
 
-A conformant loader reads both. Everything else — PBKDF2-SHA256, the 64-byte
-split, AES-256-CBC, PKCS#7, constant-time HMAC compare — is unchanged.
+A conformant loader reads all three. Everything else — AES-256-CBC, PKCS#7,
+constant-time HMAC compare — is unchanged.
 
 ### why per-value salt
 
-- **Isolation.** One file + the passphrase decrypts, with no sibling state to carry along.
+- **Isolation.** One file + the passphrase decrypts, with no sibling state to carry along (v4 and v5).
 - **Per-value cost bumps.** Raise `<iter>` on new writes as hardware improves; old values keep their own counts and still decrypt — no global re-encryption.
 - **Unique salts.** Identical plaintexts under the same passphrase yield unrelated derived keys and envelopes.
+- **Speed without giving any of that up (v5).** The shared `kdf-salt` amortizes PBKDF2 across an env; the unique per-value HKDF salt keeps every value's key distinct.
 
-Test vectors for v4 land in [`recipes/vectors/`](vectors/) once a v4 writer
-exists (#13); the existing v3 vectors keep gating the read path meanwhile.
+Test vectors for v3, v4, and v5 live in [`recipes/vectors/`](vectors/) —
+`vectors.json` plus `verify.rb`/`verify.js` are a language-neutral
+conformance oracle. Port the ~20 lines of decrypt and run it against the
+JSON to prove a loader is correct.
 
 ## passphrase resolution
 
@@ -326,7 +384,7 @@ Three operations, idiomatic to the target language:
 
 1. **`get(env_name, key)`** — decrypt and return the plaintext bytes for one key. Errors on missing key, missing passphrase, MAC failure, malformed envelope.
 
-2. **`set(env_name, key, plaintext)`** — encrypt the plaintext and atomically write to `<root>/xenv/envs/<env_name>/<key>.value.enc`. Reuses the existing env's `salt` and `iter` from the env's `README.md` frontmatter; only a fresh IV is generated. If the env directory or its README doesn't exist, error.
+2. **`set(env_name, key, plaintext)`** — encrypt the plaintext and atomically write to `<root>/xenv/envs/<env_name>/<key>.value.enc`. The recipes write the v3 envelope for maximum compatibility, reusing the env's `salt` and `iter` from its `README.md` frontmatter with a fresh IV. (Reading is what must be exhaustive — a recipe reads v3/v4/v5; the shell tool writes v5.) If the env directory or its README doesn't exist, error.
 
 3. **`load(env_name)`** — return a `{KEY: plaintext}` map of every variable in the named env. Read all `*.value.enc` files (excluding the README), decrypt each, return the map.
 

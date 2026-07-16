@@ -103,10 +103,12 @@ static class Xenv
         return (int.Parse(iter), salt);
     }
 
+    static byte[] Pbkdf2Okm(string pass, string saltHex, int iter) =>
+        Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(pass), Convert.FromHexString(saltHex), iter, HashAlgorithmName.SHA256, 64);
+
     static (byte[] enc, byte[] mac) DeriveKeys(string pass, string saltHex, int iter)
     {
-        byte[] outb = Rfc2898DeriveBytes.Pbkdf2(
-            Encoding.UTF8.GetBytes(pass), Convert.FromHexString(saltHex), iter, HashAlgorithmName.SHA256, 64);
+        byte[] outb = Pbkdf2Okm(pass, saltHex, iter);
         return (outb[..32], outb[32..]);
     }
 
@@ -114,7 +116,9 @@ static class Xenv
 
     // Dual-read: v3 uses the caller's README-derived keys; v4 is
     // self-contained — salt/iter come from the envelope.
-    static byte[] DecryptEnvelope(string envelope, string passphrase, byte[] v3Enc, byte[] v3Mac)
+    // Dual-read v3/v4/v5. Caller precomputes envOkm = PBKDF2 over the env
+    // README salt/iter ONCE; per value it's a slice (v3) or a cheap HKDF (v5).
+    static byte[] DecryptEnvelope(string envelope, string passphrase, string ctxSalt, int ctxIter, byte[] envOkm)
     {
         var parts = envelope.Trim().Split(':');
         if (parts.Length < 2 || parts[0] != "xenv") throw new Exception("envelope: not xenv");
@@ -125,7 +129,7 @@ static class Xenv
         {
             if (parts.Length != 5) throw new Exception("envelope: wrong field count");
             ivHex = parts[2]; ctHex = parts[3]; macHex = parts[4];
-            encKey = v3Enc; macKey = v3Mac;
+            encKey = envOkm[..32]; macKey = envOkm[32..];
             macScope = $"v3:{ivHex}:{ctHex}";
         }
         else if (parts[1] == "v4")
@@ -134,11 +138,24 @@ static class Xenv
             string saltHex = parts[2], iterStr = parts[3];
             ivHex = parts[4]; ctHex = parts[5]; macHex = parts[6];
             if (!Regex.IsMatch(saltHex, "^[0-9a-f]{32}$")) throw new Exception("envelope: bad salt");
-            // iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
             if (!Regex.IsMatch(iterStr, "^[0-9]+$") || !int.TryParse(iterStr, out int iterVal) || iterVal < 1 || iterVal > 10_000_000)
                 throw new Exception("envelope: bad iter");
-            (encKey, macKey) = DeriveKeys(passphrase, saltHex, iterVal);
+            var okm = Pbkdf2Okm(passphrase, saltHex, iterVal);
+            encKey = okm[..32]; macKey = okm[32..];
             macScope = $"v4:{saltHex}:{iterStr}:{ivHex}:{ctHex}";
+        }
+        else if (parts[1] == "v5")
+        {
+            if (parts.Length != 8) throw new Exception("envelope: wrong field count");
+            string kdfSalt = parts[2], iterStr = parts[3], valueSalt = parts[4];
+            ivHex = parts[5]; ctHex = parts[6]; macHex = parts[7];
+            if (!Regex.IsMatch(kdfSalt, "^[0-9a-f]{32}$") || !Regex.IsMatch(valueSalt, "^[0-9a-f]{32}$")) throw new Exception("envelope: bad salt");
+            if (!Regex.IsMatch(iterStr, "^[0-9]+$") || !int.TryParse(iterStr, out int iterVal) || iterVal < 1 || iterVal > 10_000_000)
+                throw new Exception("envelope: bad iter");
+            var ikm = (kdfSalt == ctxSalt && iterVal == ctxIter) ? envOkm : Pbkdf2Okm(passphrase, kdfSalt, iterVal);
+            var okm = HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, 64, Convert.FromHexString(valueSalt), Encoding.ASCII.GetBytes("xenv:v5"));
+            encKey = okm[..32]; macKey = okm[32..];
+            macScope = $"v5:{kdfSalt}:{iterStr}:{valueSalt}:{ivHex}:{ctHex}";
         }
         else
         {
@@ -178,10 +195,10 @@ static class Xenv
     {
         var (iter, salt) = ReadParams(env);
         var pass = Passphrase(env);
-        var (enc, mac) = DeriveKeys(pass, salt, iter);
+        var envOkm = Pbkdf2Okm(pass, salt, iter);
         var file = Path.Combine(Root(), "envs", env, key + ValueExt);
         if (!File.Exists(file)) throw new Exception($"no such key: {key}");
-        return DecryptEnvelope(File.ReadAllText(file), pass, enc, mac);
+        return DecryptEnvelope(File.ReadAllText(file), pass, salt, iter, envOkm);
     }
 
     public static void Set(string env, string key, byte[] plaintext)
@@ -200,7 +217,7 @@ static class Xenv
     {
         var (iter, salt) = ReadParams(env);
         var pass = Passphrase(env);
-        var (enc, mac) = DeriveKeys(pass, salt, iter);
+        var envOkm = Pbkdf2Okm(pass, salt, iter);   // ONE PBKDF2 for the env
         var dir = Path.Combine(Root(), "envs", env);
         var res = new List<(string, byte[])>();
         foreach (var path in Directory.GetFiles(dir).OrderBy(p => Path.GetFileName(p), StringComparer.Ordinal))
@@ -208,7 +225,7 @@ static class Xenv
             var name = Path.GetFileName(path);
             if (!name.EndsWith(ValueExt)) continue;
             var key = name[..^ValueExt.Length];
-            res.Add((key, DecryptEnvelope(File.ReadAllText(path), pass, enc, mac)));
+            res.Add((key, DecryptEnvelope(File.ReadAllText(path), pass, salt, iter, envOkm)));
         }
         return res;
     }

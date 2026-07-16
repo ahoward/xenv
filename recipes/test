@@ -71,6 +71,13 @@ exercise() {
   }
   assert "$name get V4_DEMO (v4 dual-read)" "v4-self-contained" "$out"
 
+  # ── get a v5 (two-level KDF) value — proves the loader reads HKDF envelopes
+  out=$("$@" get production V5_DEMO 2>&1) || {
+    red "  FAIL  $name get V5_DEMO (v5) errored: $out"
+    FAIL=$((FAIL + 1)); return
+  }
+  assert "$name get V5_DEMO (v5 two-level KDF)" "v5-two-level-kdf" "$out"
+
   # ── load produces all four known keys
   all=$("$@" load production 2>&1) || {
     red "  FAIL  $name load errored: $all"

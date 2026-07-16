@@ -77,15 +77,26 @@ def _read_params(env_name: str):
     return int(iter_str), salt
 
 
+def _pbkdf2_okm(passphrase: str, salt_hex: str, iters: int) -> bytes:
+    return hashlib.pbkdf2_hmac("sha256", passphrase.encode("utf-8"), binascii.unhexlify(salt_hex), iters, 64)
+
+
 def _derive_keys(passphrase: str, salt_hex: str, iters: int):
-    salt = binascii.unhexlify(salt_hex)
-    derived = hashlib.pbkdf2_hmac("sha256", passphrase.encode("utf-8"), salt, iters, 64)
-    return derived[:32], derived[32:]
+    okm = _pbkdf2_okm(passphrase, salt_hex, iters)
+    return okm[:32], okm[32:]
 
 
-def _decrypt_envelope(envelope: str, passphrase: str, v3_enc: bytes, v3_mac: bytes) -> bytes:
-    # Dual-read: v3 uses the caller's README-derived keys; v4 is
-    # self-contained — salt/iter come from the envelope.
+def _hkdf64(ikm: bytes, salt: bytes, info: bytes = b"xenv:v5") -> bytes:
+    # HKDF-SHA256 (RFC 5869), L=64. Matches the tool's construction.
+    prk = hmac.new(salt, ikm, hashlib.sha256).digest()
+    t1 = hmac.new(prk, info + b"\x01", hashlib.sha256).digest()
+    t2 = hmac.new(prk, t1 + info + b"\x02", hashlib.sha256).digest()
+    return t1 + t2
+
+
+def _decrypt_envelope(envelope: str, passphrase: str, ctx_salt: str, ctx_iter: int, env_okm: bytes) -> bytes:
+    # Dual-read v3/v4/v5. Caller precomputes env_okm = PBKDF2 over the env
+    # README salt/iter ONCE; per value it's a slice (v3) or a cheap HKDF (v5).
     parts = envelope.strip().split(":")
     if not parts or parts[0] != "xenv":
         raise ValueError("envelope: not xenv")
@@ -94,7 +105,7 @@ def _decrypt_envelope(envelope: str, passphrase: str, v3_enc: bytes, v3_mac: byt
         if len(parts) != 5:
             raise ValueError("envelope: wrong field count")
         _, _, iv_hex, ct_hex, mac_hex = parts
-        enc_key, mac_key = v3_enc, v3_mac
+        enc_key, mac_key = env_okm[:32], env_okm[32:]
         mac_scope = f"v3:{iv_hex}:{ct_hex}"
     elif ver == "v4":
         if len(parts) != 7:
@@ -102,11 +113,23 @@ def _decrypt_envelope(envelope: str, passphrase: str, v3_enc: bytes, v3_mac: byt
         _, _, salt_hex, it, iv_hex, ct_hex, mac_hex = parts
         if not re.fullmatch(r"[0-9a-f]{32}", salt_hex):
             raise ValueError("envelope: bad salt")
-        # iter is attacker-controllable in v4 → bound it before PBKDF2 (DoS guard)
         if not re.fullmatch(r"[0-9]+", it) or not (1 <= int(it) <= 10_000_000):
             raise ValueError("envelope: bad iter")
-        enc_key, mac_key = _derive_keys(passphrase, salt_hex, int(it))
+        okm = _pbkdf2_okm(passphrase, salt_hex, int(it))
+        enc_key, mac_key = okm[:32], okm[32:]
         mac_scope = f"v4:{salt_hex}:{it}:{iv_hex}:{ct_hex}"
+    elif ver == "v5":
+        if len(parts) != 8:
+            raise ValueError("envelope: wrong field count")
+        _, _, kdf_salt, it, value_salt, iv_hex, ct_hex, mac_hex = parts
+        if not re.fullmatch(r"[0-9a-f]{32}", kdf_salt) or not re.fullmatch(r"[0-9a-f]{32}", value_salt):
+            raise ValueError("envelope: bad salt")
+        if not re.fullmatch(r"[0-9]+", it) or not (1 <= int(it) <= 10_000_000):
+            raise ValueError("envelope: bad iter")
+        ikm = env_okm if (kdf_salt == ctx_salt and int(it) == int(ctx_iter)) else _pbkdf2_okm(passphrase, kdf_salt, int(it))
+        okm = _hkdf64(ikm, binascii.unhexlify(value_salt))
+        enc_key, mac_key = okm[:32], okm[32:]
+        mac_scope = f"v5:{kdf_salt}:{it}:{value_salt}:{iv_hex}:{ct_hex}"
     else:
         raise ValueError(f"envelope: unsupported version {ver}")
     if len(iv_hex) != 32 or len(mac_hex) != 64:
@@ -162,11 +185,11 @@ def get(env_name: str, key: str) -> bytes:
     """Decrypt and return the plaintext bytes for one key."""
     iters, salt = _read_params(env_name)
     pw = _passphrase(env_name)
-    v3_enc, v3_mac = _derive_keys(pw, salt, iters)
+    env_okm = _pbkdf2_okm(pw, salt, iters)
     f = _root() / "envs" / env_name / (key + VALUE_EXT)
     if not f.is_file():
         raise FileNotFoundError(f"no such key: {key}")
-    return _decrypt_envelope(f.read_text(), pw, v3_enc, v3_mac)
+    return _decrypt_envelope(f.read_text(), pw, salt, iters, env_okm)
 
 
 def set(env_name: str, key: str, plaintext: bytes):
@@ -187,14 +210,14 @@ def load(env_name: str) -> dict:
     """Return {KEY: plaintext-bytes} for every value in the named env."""
     iters, salt = _read_params(env_name)
     pw = _passphrase(env_name)
-    v3_enc, v3_mac = _derive_keys(pw, salt, iters)
+    env_okm = _pbkdf2_okm(pw, salt, iters)
     env_dir = _root() / "envs" / env_name
     out = {}
     for f in sorted(env_dir.iterdir()):
         if not f.name.endswith(VALUE_EXT):
             continue
         key = f.name[: -len(VALUE_EXT)]
-        out[key] = _decrypt_envelope(f.read_text(), pw, v3_enc, v3_mac)
+        out[key] = _decrypt_envelope(f.read_text(), pw, salt, iters, env_okm)
     return out
 
 
