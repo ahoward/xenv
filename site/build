@@ -58,7 +58,11 @@ A project uses xenv iff it has an `xenv/` directory:
         ├── README.md               # KDF params for v3 values (frontmatter)
         └── <KEY>.value.enc         # one encrypted value per file
 
-The environments are the subdirectories of `xenv/envs/` (e.g. production).
+The environments are the subdirectories of `xenv/envs/`. A repo may have a
+single env (the common case — `xenv setup` makes one named `development`) or
+several (`production`, `staging`, …). To choose which to load: if there is
+exactly one, that is the default (and `@<env>` is optional); otherwise pick
+by name.
 
 ## load an env — the thing you almost always want
 
