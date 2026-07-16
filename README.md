@@ -6,7 +6,7 @@
 
 ## NAME
 
-xenv — encrypted environment variables you commit straight into your repo
+xenv — a git-backed secrets vault: encrypted environment variables you commit straight into your repo
 
 ## WHY
 
@@ -18,13 +18,17 @@ xenv removes the choice. There is no plaintext on disk to commit. Each variable 
 xenv set @production STRIPE_KEY=sk_live_...    # → one encrypted file, safe to commit
 xenv @production ./deploy                       # decrypt at exec-time; nothing hits disk
 xenv @production --json | jq -r .DATABASE_URL   # load into any language
+xenv @production --dotenv > .env                # or dump a plaintext cache, then go
 ```
 
-It's a single POSIX shell script over `openssl(1)` — no daemon, no service, no account, no SaaS, no lock-in. The crypto is three ~15-line functions; read them and you've read xenv. The wire format is documented, frozen, and shipped with [conformance vectors](recipes/vectors/), so if the tool ever vanished a 20-line decryptor in any language still opens your data.
+Because the ciphertext lives in the repo and the passphrase doesn't, the whole secret lifecycle rides **normal git**: change a value → commit → PR → review the diff → merge. GitHub's repo permissions *are* your access control — no server, no SaaS, no separate secrets system to stand up. It's a git-backed vault you adopt incrementally: devs and CI dump the env and get on with their day (`--dotenv`, `--json`, or exec-time), and PRs manage secrets the way they already manage code.
+
+It's a single POSIX shell script over `openssl(1)` — no daemon, no service, no account, no lock-in. The crypto is three ~15-line functions; read them and you've read xenv. The wire format is documented, frozen, and shipped with [conformance vectors](recipes/vectors/), so if the tool ever vanished a 20-line decryptor in any language still opens your data.
 
 **The bet: the format is the product; the tool is disposable.**
 
 - **Commit-safe by construction** — no plaintext on disk, no `.gitignore` to forget, no easy/secure split.
+- **Managed by git** — change a secret with a PR; GitHub perms are the ACL; rotation (`xenv key rotate`), not deletion, is how you revoke (history keeps old ciphertext).
 - **Just `sh` + `openssl`** — one writer, no runtime service; nine read-only reimplementations (Python/Node/Ruby/Go/Rust/PHP/Java/C#/Elixir), all cross-verified in CI.
 - **The format is the spec** — three tiny crypto functions, an offline oracle to prove any implementation, zero vendor to outlive.
 - **Agent-ready** — `xenv @env --json` loads an env in any language; an agent can't leak what was never on disk.
@@ -82,6 +86,7 @@ xenv run    @<env> CMD [args]
 xenv @<env>      CMD [args]            # shorthand for run
 xenv @<env>                            # no CMD: print KEY=value lines
 xenv @<env> --json                     # print the env as one JSON object
+xenv @<env> --dotenv                    # print a dotenv-safe .env (fast-load cache)
 
 xenv help | version
 ```

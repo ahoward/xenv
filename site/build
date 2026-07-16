@@ -40,10 +40,16 @@ EOF
 cat > "$DIST/llms.txt" <<'EOF'
 # xenv — the ENV for AI
 
-Encrypted, per-key, commit-safe environment variables. A POSIX shell
-script plus openssl. Zero deps, zero lock-in, zero runtime. Every file
-in xenv/ is safe to commit; the passphrase is the only secret and it
-never lives in the repo.
+A git-backed secrets vault: encrypted, per-key, commit-safe environment
+variables. A POSIX shell script plus openssl. Zero deps, zero lock-in, zero
+runtime. Every file in xenv/ is safe to commit; the passphrase is the only
+secret and it never lives in the repo.
+
+Because the ciphertext lives in the repo and the passphrase doesn't, secrets
+are managed with normal git: change a value, commit, PR, review the diff,
+merge. GitHub's repo permissions are the access control — no server, no SaaS.
+Devs and CI dump the env and proceed as usual. (Revoke = `xenv key rotate`,
+not deletion — git history keeps old ciphertext.)
 
 This file is written for coding agents. If you are an agent in a repo
 that contains an `xenv/` directory, this is your operating manual.
