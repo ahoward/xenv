@@ -23,15 +23,16 @@ xenv @production --dotenv > .env                # or dump a plaintext cache, the
 
 Because the ciphertext lives in the repo and the passphrase doesn't, the whole secret lifecycle rides **normal git**: change a value → commit → PR → review the diff → merge. GitHub's repo permissions *are* your access control — no server, no SaaS, no separate secrets system to stand up. It's a git-backed vault you adopt incrementally: devs and CI dump the env and get on with their day (`--dotenv`, `--json`, or exec-time), and PRs manage secrets the way they already manage code.
 
-It's a single POSIX shell script over `openssl(1)` — no daemon, no service, no account, no lock-in. The crypto is three ~15-line functions; read them and you've read xenv. The wire format is documented, frozen, and shipped with [conformance vectors](recipes/vectors/), so if the tool ever vanished a 20-line decryptor in any language still opens your data.
+It's a single POSIX shell script over `openssl(1)` — no daemon, no service, no account, no lock-in. `xenv setup` **vendors** a self-contained copy into `xenv/bin/xenv`, so the tool travels *in* your repo, pinned to the commit that wrote your secrets — no install step, no package to drift. And because it's one small script — the crypto is three ~15-line functions — you can read the whole thing end to end. So can an agent: it fits in context, so an AI can **audit** the tool it's about to trust before running it. The wire format is documented, frozen, and shipped with [conformance vectors](recipes/vectors/), so if the tool ever vanished a 20-line decryptor in any language still opens your data.
 
 **The bet: the format is the product; the tool is disposable.**
 
 - **Commit-safe by construction** — no plaintext on disk, no `.gitignore` to forget, no easy/secure split.
 - **Managed by git** — change a secret with a PR; GitHub perms are the ACL; rotation (`xenv key rotate`), not deletion, is how you revoke (history keeps old ciphertext).
+- **Vendored & auditable** — ships *in* the repo (`xenv/bin/xenv`), pinned, no install; small enough that a human or an agent can read and audit the entire tool in one sitting.
 - **Just `sh` + `openssl`** — one writer, no runtime service; nine read-only reimplementations (Python/Node/Ruby/Go/Rust/PHP/Java/C#/Elixir), all cross-verified in CI.
 - **The format is the spec** — three tiny crypto functions, an offline oracle to prove any implementation, zero vendor to outlive.
-- **Agent-ready** — `xenv @env --json` loads an env in any language; an agent can't leak what was never on disk.
+- **Agent-ready** — `xenv @env --json` loads an env in any language; an agent can't leak what was never on disk, and can vet the vendored script before trusting it.
 
 ```
 xenv

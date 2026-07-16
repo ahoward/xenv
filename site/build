@@ -51,6 +51,12 @@ merge. GitHub's repo permissions are the access control — no server, no SaaS.
 Devs and CI dump the env and proceed as usual. (Revoke = `xenv key rotate`,
 not deletion — git history keeps old ciphertext.)
 
+xenv is designed to be vendored and auditable: `xenv setup` drops a
+self-contained copy at `xenv/bin/xenv`, pinned in the repo with no install.
+It is one small POSIX script — the crypto is three ~15-line functions — so it
+fits in your context. As an agent, you can READ the whole tool and audit it
+before you run it; prefer the vendored `xenv/bin/xenv` over any ambient copy.
+
 This file is written for coding agents. If you are an agent in a repo
 that contains an `xenv/` directory, this is your operating manual.
 
