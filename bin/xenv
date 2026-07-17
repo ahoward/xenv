@@ -40,7 +40,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.15.0-posix"
+XENV_VERSION="0.16.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
@@ -1164,7 +1164,8 @@ usage:
   xenv key forget   [@<env>]         rm cached passphrase, leave vault
 
   xenv set    @<env> KEY=value       store a value
-  xenv set    @<env> KEY             read value from stdin (multi-line OK)
+  xenv set    @<env> KEY             read value from stdin (multi-line OK;
+                                     prompts + line-edits when interactive)
   xenv get    @<env> KEY             decrypt one key (silent on success)
   xenv unset  @<env> KEY             delete a key
   xenv list   @<env>                 list key names (no decryption)
@@ -1241,6 +1242,35 @@ read_passphrase() {
     IFS= read -r pp || true
     [ -n "$pp" ] || return 1
     printf '%s' "$pp"
+  fi
+}
+
+# read a value from stdin for `xenv set @env KEY`. Piped or redirected
+# (non-tty) input passes through verbatim via cat — multi-line and binary
+# safe, exactly as before. At a tty we instead prompt (so `set KEY` is not a
+# silent hang) and read line-by-line with the shell's line editing until EOF
+# (Ctrl-D), rejoining with newlines so a pasted multi-line value (PEM, cert)
+# is captured intact. The caller's $() strips the trailing newline, same as
+# cat. The `|| [ -n "$line" ]` clause keeps a final line typed without a
+# trailing newline (Ctrl-D straight after the text).
+read_value() {
+  key=$1
+  if [ -t 0 ]; then
+    printf 'value for %s (end with Ctrl-D):\n' "$key" >&2
+    nl='
+'
+    val=
+    first=1
+    while IFS= read -r line || [ -n "$line" ]; do
+      if [ "$first" -eq 1 ]; then
+        val=$line; first=0
+      else
+        val=$val$nl$line
+      fi
+    done
+    printf '%s' "$val"
+  else
+    cat
   fi
 }
 
@@ -1920,7 +1950,7 @@ cmd_set() {
       ;;
     *)
       name=$arg
-      value=$(cat)
+      value=$(read_value "$name")
       ;;
   esac
 

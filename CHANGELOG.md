@@ -7,6 +7,18 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.16.0-posix] — 2026-07-17
+
+### Changed
+
+- **`xenv set @<env> KEY` prompts when interactive.** Reading a value from
+  stdin used to be a silent `cat` — at a tty it looked like a hang. Now, when
+  stdin is a tty, `set KEY` prints a prompt (`value for KEY (end with
+  Ctrl-D):`) and reads with the shell's line editing, rejoining lines so a
+  pasted multi-line value (PEM, cert) is captured intact. Piped/redirected
+  input (`… | xenv set KEY`, `xenv set KEY < file`) is unchanged — still a
+  verbatim, binary-safe `cat`. No format change.
+
 ## [0.15.0-posix] — 2026-07-16
 
 Add a plaintext `.env` fast-load cache — decrypt once, skip per-boot crypto.
