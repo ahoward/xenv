@@ -96,9 +96,13 @@ binary is present — shell out:
 `xenv @<env> ./cmd` runs a command with the env injected (nothing hits
 disk). `xenv list @<env>` lists key names without the passphrase.
 
-`xenv @<env> --dotenv > .env` dumps a plaintext `.env` cache (dotenv-safe
-quoting) — a human speed trade-off for boot-heavy apps, NOT for agents:
-gitignore and chmod 600 it. Prefer `--json` (in memory) when you can.
+`xenv @<env> --dotenv > .env` dumps a **plaintext** `.env` cache: decrypt
+once, then the app reads it with any dotenv loader and pays no per-boot KDF.
+Values are double-quoted with only `\\` and `\"` escaped and real newlines
+inside the quotes — the interoperable subset (python-dotenv, Ruby dotenv,
+motdotla/dotenv, godotenv all round-trip it). `--json` stays encrypted in
+memory; `--dotenv` writes secrets to disk, so it is a human speed trade-off,
+NOT an agent action: gitignore and chmod 600 the `.env`, and prefer `--json`.
 
 ## the passphrase — never commit it
 
