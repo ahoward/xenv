@@ -96,6 +96,34 @@ test_version() {
   case "$(xenv version)" in xenv\ *) return 0 ;; *) return 1 ;; esac
 }
 
+test_openssl_override_is_used() {
+  # $XENV_OPENSSL points the tool at a specific openssl; a round-trip
+  # through it proves the override is honored (not just PATH's openssl).
+  xenv setup development >/dev/null 2>&1
+  xenv set @development OK=v >/dev/null 2>&1
+  real=$(command -v openssl)
+  out=$(XENV_OPENSSL="$real" xenv get @development OK 2>&1) || return 1
+  assert_eq "v" "$out" "XENV_OPENSSL override decrypts"
+}
+
+test_openssl_libressl_only_fails_cleanly() {
+  # Simulate a box whose only openssl is LibreSSL (macOS default): a fake
+  # `openssl` reports LibreSSL and no openssl3/brew keg exists. A crypto
+  # verb must fail with a clear "OpenSSL 3.0+" message — never a cryptic
+  # kdf error — while version (no crypto) still works.
+  xenv setup development >/dev/null 2>&1
+  xenv set @development OK=v >/dev/null 2>&1
+  fake="$TMP/fakebin"
+  mkdir -p "$fake"
+  printf '#!/bin/sh\necho "LibreSSL 3.3.6"\n' > "$fake/openssl"
+  chmod +x "$fake/openssl"
+
+  out=$(PATH="$fake:/usr/bin:/bin" XENV_OPENSSL= "$SHELL_BIN" "$XENV" get @development OK 2>&1) && return 1
+  printf '%s\n' "$out" | grep -qi "OpenSSL 3.0" || return 1
+  # version needs no crypto — must still succeed with no usable openssl
+  PATH="$fake:/usr/bin:/bin" XENV_OPENSSL= "$SHELL_BIN" "$XENV" version >/dev/null 2>&1 || return 1
+}
+
 # ── init creates the full layout ──────────────────────────────────
 
 test_init_creates_xenv_dir() {
@@ -1264,6 +1292,8 @@ test_set_after_unset() {
 printf 'xenv test suite (shell: %s)\n\n' "$SHELL_BIN"
 
 run_test "version"                                  test_version
+run_test "XENV_OPENSSL override is used"            test_openssl_override_is_used
+run_test "LibreSSL-only box fails cleanly"          test_openssl_libressl_only_fails_cleanly
 
 # init structure
 run_test "init creates xenv/"                       test_init_creates_xenv_dir

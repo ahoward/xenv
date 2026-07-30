@@ -34,13 +34,19 @@
 # against accidental plaintext commits and lost laptops. Does NOT protect
 # against an attacker running commands as the same user — they've already won.
 #
-# Dependencies: sh, openssl (3.0+ for kdf), awk, mktemp, od.
+# Dependencies: sh, OpenSSL 3.0+, awk, mktemp, od.
+#
+# OpenSSL 3.0+ specifically: xenv uses `openssl kdf` (PBKDF2) and
+# `dgst -macopt`, neither of which exists in the LibreSSL that macOS
+# ships as `openssl`. The tool auto-detects a real 3.x binary — PATH
+# `openssl`/`openssl3`, then Homebrew keg paths — or set $XENV_OPENSSL
+# to point at one (`brew install openssl@3` on macOS).
 
 set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.16.0-posix"
+XENV_VERSION="0.17.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
@@ -63,6 +69,54 @@ XENV_DEFAULT_ENV="development"
 err()  { printf 'xenv: %s\n' "$*" >&2; }
 die()  { err "$*"; exit 1; }
 info() { printf 'xenv: %s\n' "$*" >&2; }
+
+# ── openssl resolution ────────────────────────────────────────────
+#
+# xenv needs OpenSSL 3.0+: `openssl kdf ... PBKDF2` and `dgst -macopt`
+# are both 1.1.0/3.0-era features. macOS ships LibreSSL as `openssl`,
+# which has NEITHER — so we can't just use whatever is first on PATH; we
+# must locate a real OpenSSL 3.x (e.g. Homebrew's openssl@3).
+#
+# resolve_openssl prints the path of a usable openssl (3.x/4.x) or fails.
+# Order: $XENV_OPENSSL override, then `openssl`/`openssl3` on PATH, then
+# the common Homebrew keg locations. The `unset -f openssl` subshell keeps
+# `command -v` from resolving the wrapper function defined below.
+XENV_OPENSSL_BIN=""
+resolve_openssl() {
+  if [ -n "${XENV_OPENSSL:-}" ]; then
+    printf '%s' "$XENV_OPENSSL"
+    return 0
+  fi
+  for c in openssl openssl3 \
+           /opt/homebrew/opt/openssl@3/bin/openssl \
+           /usr/local/opt/openssl@3/bin/openssl \
+           /opt/homebrew/bin/openssl /usr/local/bin/openssl; do
+    p=$(unset -f openssl 2>/dev/null; command -v "$c" 2>/dev/null) || continue
+    [ -n "$p" ] || continue
+    case "$("$p" version 2>/dev/null)" in
+      "OpenSSL 3."*|"OpenSSL 4."*) printf '%s' "$p"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# need_openssl — resolve once into $XENV_OPENSSL_BIN (parent scope) or die
+# with a copy-pasteable fix. main() calls this for crypto verbs, so the
+# error is single and clean and every later `$(openssl …)` subshell just
+# inherits the already-resolved path.
+need_openssl() {
+  [ -n "$XENV_OPENSSL_BIN" ] && return 0
+  XENV_OPENSSL_BIN=$(resolve_openssl) || die "need OpenSSL 3.0+ — macOS ships LibreSSL, which lacks 'openssl kdf'.
+  fix: brew install openssl@3   (then re-run; or set \$XENV_OPENSSL=/path/to/openssl)"
+}
+
+# openssl — wrapper so every `openssl …` in this script routes to the
+# resolved 3.x binary. Never recurses: $XENV_OPENSSL_BIN is a path, run
+# via `command`, so command lookup never finds this function.
+openssl() {
+  [ -n "$XENV_OPENSSL_BIN" ] || need_openssl
+  command "$XENV_OPENSSL_BIN" "$@"
+}
 
 # ── name validation ───────────────────────────────────────────────
 #
@@ -2276,12 +2330,21 @@ main() {
   #     require an explicit @<env> (or a verb like --json) to dump.
   if [ -z "$cmd" ]; then
     if [ "$found" -eq 1 ] && [ -n "$env_name" ]; then
+      need_openssl
       cmd_envdump "$env_name"
       return $?
     fi
     cmd_help
     return $?
   fi
+
+  # Resolve a usable OpenSSL 3.x up front for crypto verbs, so a missing
+  # openssl fails once, cleanly, before any work. Pure-metadata verbs
+  # (help/version/list/unset/environments) touch no crypto — skip them.
+  case "$cmd" in
+    -h|--help|help|-v|--version|version|list|unset|environments) : ;;
+    *) need_openssl ;;
+  esac
 
   case "$cmd" in
     -h|--help|help)         cmd_help ;;

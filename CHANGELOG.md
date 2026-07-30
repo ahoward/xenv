@@ -7,6 +7,25 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.17.0-posix] — 2026-07-30
+
+### Added
+
+- **OpenSSL 3.x auto-detection.** xenv needs OpenSSL 3.0+ (`openssl kdf`
+  and `dgst -macopt`), which the LibreSSL that macOS ships as `openssl`
+  does not provide. The tool now resolves a usable binary instead of
+  assuming PATH's `openssl`: `$XENV_OPENSSL` override → `openssl`/`openssl3`
+  on PATH → Homebrew keg paths (`/opt/homebrew/opt/openssl@3/bin`,
+  `/usr/local/opt/openssl@3/bin`), each version-checked for 3.x/4.x. If
+  none is found, a crypto verb fails once, up front, with a copy-pasteable
+  fix (`brew install openssl@3`) instead of a cryptic KDF error. Metadata
+  verbs that touch no crypto (`version`, `help`, `list`, `unset`,
+  `environments`) still work with no usable openssl present.
+
+  Implemented as a transparent `openssl` wrapper, so every existing call
+  site routes through the resolved 3.x binary unchanged. Set `$XENV_OPENSSL`
+  to point at any openssl (including a vendored static build).
+
 ## [0.16.0-posix] — 2026-07-17
 
 ### Changed
