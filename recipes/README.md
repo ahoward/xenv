@@ -104,9 +104,19 @@ db=$(xenv @production --json | jq -r .DATABASE_URL)
 ```
 
 `--json` emits one JSON object `{"KEY":"value",...}`; every value is
-byte-exact, control characters use JSON escapes (`\n`, `\t`, `\u00XX`),
-and an empty env is `{}`. Any stdlib JSON parser loads it — no envelope
-parsing, no crypto dependency, no per-language port.
+byte-exact for valid UTF-8 text. Control characters use JSON escapes (`\n`,
+`\t`, `\u00XX`), and an empty env is `{}`. **`--json` is text-only:**
+non-UTF-8 bytes will corrupt or fail on round-trip.
+
+For binary fidelity (keyfiles, raw tokens, arbitrary bytes), use
+`--json --b64` (or `--json-base64`). This base64-encodes every value and
+injects a `"__b64": true` marker at the top level so loaders can detect
+and decode automatically:
+
+    {"__b64":true,"HELLO":"d29ybGQ="}
+
+Any stdlib JSON parser loads it; decode the marker's values and drop the
+marker before exporting.
 
 **When to use which:**
 

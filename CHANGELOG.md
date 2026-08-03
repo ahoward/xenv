@@ -7,6 +7,17 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.18.0-posix] — 2026-07-30
+
+### Added
+
+- **`--json --b64` binary-safe dump.** `xenv @<env> --json` is now documented as
+  text/UTF-8 only. Raw bytes (keyfiles, binary tokens) cannot round-trip through
+  plain JSON. `--json --b64` (alias `--json-base64`) base64-encodes every value
+  and injects a `"__b64": true` marker at the top level. Loaders detect the
+  marker, decode values, and drop the marker before exporting. Round-trips
+  arbitrary bytes losslessly.
+
 ## [0.17.0-posix] — 2026-07-30
 
 ### Added
