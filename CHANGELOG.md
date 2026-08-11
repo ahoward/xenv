@@ -7,6 +7,23 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.18.0-posix] — 2026-08-11
+
+### Added
+
+- **`XENV_LOADED` — first-class "am I loaded, and as what".** `xenv run`
+  (and the `xenv @<env> CMD` shorthand) now exports `XENV_LOADED=<env>` into
+  the child, and `xenv @<env> --dotenv` emits it as the last line, so a
+  sourced `.env` cache carries it too. A child reads it to answer "am I under
+  a loaded vault, and which env?" instead of sniffing side effects like "is
+  `DATABASE_URL` set?" (a heuristic that breaks and can't say *which* env).
+  Distinct from `$XENV_ENV`, which is an INPUT (default-env resolution);
+  `XENV_LOADED` is an OUTPUT set by xenv. Value is the resolved env name
+  (non-secret). Nested runs overwrite it (innermost wins). `--json` stays a
+  pure values map (no marker). The `XENV_` prefix is reserved.
+
+  Resolves #29 (carried in production as a vendored patch, now upstream).
+
 ## [0.17.0-posix] — 2026-07-30
 
 ### Added

@@ -46,7 +46,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.17.0-posix"
+XENV_VERSION="0.18.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
@@ -1226,6 +1226,7 @@ usage:
   xenv edit   @<env> KEY             decrypt → $VISUAL/$EDITOR → re-encrypt
 
   xenv run    @<env> CMD [args]      run command with all keys exported
+                                     (also exports XENV_LOADED=<env>)
   xenv @<env>      CMD [args]        shorthand for run
   xenv @<env>                        no CMD: print KEY=value lines
   xenv @<env> --json                 print the env as one JSON object
@@ -1255,6 +1256,12 @@ so in a single-env repo these need no @<env>, zero config:
 multi-env repos stay explicit: name @<env> or set $XENV_ENV. bare `xenv`
 (no verb) still prints help — dumping requires an explicit @<env>, so an
 implicit default never spills secrets on a bare command.
+
+$XENV_ENV vs $XENV_LOADED: $XENV_ENV is an INPUT (which env to resolve when
+no @<env> is given). $XENV_LOADED is an OUTPUT set BY xenv to the env that
+was actually loaded — `xenv run` exports it, and `--dotenv` emits it — so a
+child can ask "am I under a vault, and which one?" without sniffing keys.
+The XENV_ prefix is reserved; don't use it for your own value names.
 
 passphrase cascade (first hit wins, env-specific beats global per backend):
   1. $XENV_KEY_<ENV>                              env-specific env var
@@ -2124,6 +2131,16 @@ cmd_run() {
     export "$name"
   done
 
+  # First-class "am I loaded, and as what": a child reads $XENV_LOADED
+  # instead of sniffing side effects. Distinct from $XENV_ENV, which is an
+  # INPUT (default-env resolution), not a loaded marker. Set AFTER the
+  # export loop, so it is authoritative even over a vault key of the same
+  # reserved name; a nested `xenv run` overwrites it (innermost wins, which
+  # matches what the environment actually contains). Value is the resolved
+  # env NAME — non-secret, safe for any env inspector to display.
+  XENV_LOADED=$env_name
+  export XENV_LOADED
+
   exec "$@"
 }
 
@@ -2226,6 +2243,13 @@ cmd_envdump_dotenv() {
     decrypt_envelope "$pp" "$ctx_salt" "$ctx_iter" "$env_okm" < "$f" > "$tmp" || die "decrypt failed for $name"
     printf '%s=%s\n' "$name" "$(dotenv_string < "$tmp")"
   done
+
+  # marker line: the same "am I loaded, and as what" signal as `xenv run`, so
+  # an app that sources this .env cache instead of exec'ing under `xenv run`
+  # still gets it. Emitted LAST so it wins under last-key-wins dotenv parsers
+  # (python-dotenv, Ruby dotenv, godotenv) — matching run's authoritative
+  # placement. env names are [A-Za-z0-9_-], so no escaping is needed.
+  printf 'XENV_LOADED="%s"\n' "$env_name"
 
   rm -f "$tmp"
   trap - EXIT INT TERM HUP

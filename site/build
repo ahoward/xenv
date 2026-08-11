@@ -96,6 +96,19 @@ binary is present — shell out:
 `xenv @<env> ./cmd` runs a command with the env injected (nothing hits
 disk). `xenv list @<env>` lists key names without the passphrase.
 
+## am I loaded, and as what — $XENV_LOADED
+
+`xenv run` (and the `xenv @<env> CMD` shorthand) exports `XENV_LOADED=<env>`
+into the child. Read it to answer "am I running under a loaded vault, and
+which env?" — do NOT sniff for a specific key like `DATABASE_URL`; that is a
+heuristic that breaks and cannot tell which env is loaded. `$XENV_LOADED` is
+an OUTPUT set by xenv; `$XENV_ENV` is an INPUT (which env to resolve) — do
+not confuse them. A `--dotenv` cache carries the same marker as its last
+line, so a sourced `.env` sets it too. If `$XENV_LOADED` disagrees with an
+app's own `APP_ENV`, that is a real config mismatch worth erroring on.
+Nested `xenv run` overwrites it (innermost wins). The `XENV_` prefix is
+reserved — never set your own `XENV_*` values.
+
 `xenv @<env> --dotenv > .env` dumps a **plaintext** `.env` cache: decrypt
 once, then the app reads it with any dotenv loader and pays no per-boot KDF.
 Values are double-quoted with only `\\` and `\"` escaped and real newlines

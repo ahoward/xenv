@@ -187,7 +187,7 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` **3.0+**, `awk`, 
 > Decrypt to a tmpfile (mode 600 in `$TMPDIR`), invoke `$VISUAL` or `$EDITOR` or `vi`, re-encrypt on exit. The tmpfile is cleaned via `trap` on `EXIT INT TERM HUP`. If the editor closes without changes, the encrypted file is not rewritten.
 
 `run @<env> CMD [args]`
-> Decrypt every value in the env, export each as a shell variable, then `exec` CMD with the env injected. PBKDF2 runs once per call, not once per key. `xenv @<env> CMD [args]` is the screaming-loud shorthand: `xenv @production ./deploy`. With **no** CMD, `xenv @<env>` decrypts everything and prints `KEY=value` lines to stdout — same shape as `env(1)` — letting you peek at the loaded env without exec'ing anything.
+> Decrypt every value in the env, export each as a shell variable, then `exec` CMD with the env injected. PBKDF2 runs once per call, not once per key. It also exports **`XENV_LOADED=<env>`** so a child can ask "am I under a vault, and which one?" without sniffing for a specific key (see [`XENV_LOADED`](#environment)). `xenv @<env> CMD [args]` is the screaming-loud shorthand: `xenv @production ./deploy`. With **no** CMD, `xenv @<env>` decrypts everything and prints `KEY=value` lines to stdout — same shape as `env(1)` — letting you peek at the loaded env without exec'ing anything.
 
 `@<env> --json`
 > Decrypt the whole env and print it as one JSON object `{"KEY":"value",...}` on a single line. Unlike `KEY=value` lines, JSON is unambiguous for values containing `=`, quotes, newlines, or leading/trailing whitespace — so any language loads an env with its stdlib parser and no custom splitting:
@@ -206,7 +206,13 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` **3.0+**, `awk`, 
 ## ENVIRONMENT
 
 `XENV_ENV`
-> Default env when no `@<env>` appears in argv, e.g. `export XENV_ENV=production` then `xenv get API_KEY`. Checked before the sole-env fallback; an explicit `@<env>` always wins. Does not affect bare `xenv` (still prints help, never dumps).
+> Default env when no `@<env>` appears in argv, e.g. `export XENV_ENV=production` then `xenv get API_KEY`. Checked before the sole-env fallback; an explicit `@<env>` always wins. Does not affect bare `xenv` (still prints help, never dumps). This is an **input** — which env to resolve — not a marker of what got loaded (that's `XENV_LOADED`).
+
+`XENV_LOADED`
+> **Output**, set *by* xenv to the env that was actually loaded: `xenv run` exports it, and `xenv @<env> --dotenv` emits it as the last line (so a sourced `.env` cache carries it too). A child reads it to answer "am I under a loaded vault, and as what?" — the first-class replacement for sniffing side effects like "is `DATABASE_URL` set?". Nested `xenv run` overwrites it (innermost wins). The value is the env name — non-secret. The `XENV_` prefix is reserved; don't use it for your own variable names.
+
+`XENV_OPENSSL`
+> Path to the OpenSSL 3.x binary to use. When unset, xenv auto-detects: `openssl`/`openssl3` on PATH, then Homebrew keg paths, each version-checked. macOS ships LibreSSL (no `openssl kdf`), so on a Mac install `brew install openssl@3` or point this at one. Also the hook for a vendored static openssl.
 
 `XENV_KEY_<ENV>`
 > Per-env passphrase. Highest priority. `<ENV>` is the env name uppercased with `-` replaced by `_`. For CI, set this as a platform secret.

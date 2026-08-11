@@ -665,6 +665,40 @@ test_run_no_env_fails() {
   return 0
 }
 
+test_run_exports_xenv_loaded() {
+  # `xenv run` marks the process with $XENV_LOADED=<resolved env>, so a child
+  # can ask "am I loaded, and as what" instead of sniffing side effects.
+  xenv setup testing development staging production >/dev/null 2>&1
+  out=$(xenv run @production sh -c 'printf "%s" "$XENV_LOADED"')
+  assert_eq "production" "$out" "run exports XENV_LOADED=<env>"
+}
+
+test_run_nested_overwrites_xenv_loaded() {
+  # Nested runs overwrite — innermost wins, matching what the environment
+  # actually contains.
+  xenv setup testing development staging production >/dev/null 2>&1
+  out=$(xenv run @production "$SHELL_BIN" "$XENV" run @staging sh -c 'printf "%s" "$XENV_LOADED"')
+  assert_eq "staging" "$out" "nested run: innermost XENV_LOADED wins"
+}
+
+test_dotenv_includes_loaded_marker_last() {
+  # The sourceable .env cache carries the same marker, emitted LAST so it
+  # wins under last-key-wins dotenv parsers.
+  xenv setup testing development staging production >/dev/null 2>&1
+  out=$(xenv @production --dotenv) || return 1
+  printf '%s\n' "$out" | grep -qx 'XENV_LOADED="production"' || return 1
+  # must be the final line
+  last=$(printf '%s\n' "$out" | tail -n1)
+  assert_eq 'XENV_LOADED="production"' "$last" "XENV_LOADED marker is last"
+}
+
+test_json_omits_loaded_marker() {
+  # --json is a pure values map — no synthetic marker.
+  xenv setup testing development staging production >/dev/null 2>&1
+  out=$(xenv @production --json) || return 1
+  case "$out" in *XENV_LOADED*) return 1 ;; *) return 0 ;; esac
+}
+
 test_at_shorthand_runs_like_run() {
   # `xenv @<env> CMD` is the screaming-loud shorthand for `xenv run <env> CMD`.
   xenv setup testing development staging production >/dev/null 2>&1
@@ -1354,6 +1388,10 @@ run_test "run injects env"                          test_run_injects_env
 run_test "run preserves multi-line"                 test_run_preserves_multiline
 run_test "run propagates exit code"                 test_run_propagates_exit_code
 run_test "run no command fails"                     test_run_no_command_fails
+run_test "run exports XENV_LOADED"                  test_run_exports_xenv_loaded
+run_test "nested run overwrites XENV_LOADED"        test_run_nested_overwrites_xenv_loaded
+run_test "--dotenv includes XENV_LOADED last"       test_dotenv_includes_loaded_marker_last
+run_test "--json omits XENV_LOADED"                 test_json_omits_loaded_marker
 run_test "run no env fails"                         test_run_no_env_fails
 run_test "@env shorthand runs like `run`"           test_at_shorthand_runs_like_run
 run_test "@env shorthand propagates exit code"      test_at_shorthand_propagates_exit_code
