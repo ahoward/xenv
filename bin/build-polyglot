@@ -1,0 +1,104 @@
+#!/bin/sh
+# build-polyglot — assemble the polyglot `xenv` from the shell bootstrap
+# template (below) + the canonical Go source (bin/xenv.go).
+#
+# The output is BOTH a POSIX script and a carrier for the Go source: on run
+# the shell part execs a cached compiled binary, building it from the
+# embedded source on first run (needs `go`) or falling back to a prebuilt
+# release binary. The shell exec/exits before reaching the Go region, so the
+# Go source is never parsed as shell.
+#
+#   bin/build-polyglot            # -> writes bin/xenv (the polyglot)
+#   bin/build-polyglot /dev/stdout
+set -u
+
+here=$(cd "$(dirname "$0")" && pwd)
+src="$here/xenv.go"
+out=${1:-"$here/xenv"}
+
+[ -f "$src" ] || { echo "build-polyglot: no $src" >&2; exit 1; }
+
+tmp=$(mktemp "${TMPDIR:-/tmp}/xenv-poly.XXXXXXXX") || exit 1
+trap 'rm -f "$tmp"' EXIT INT TERM HUP
+
+cat > "$tmp" <<'BOOTSTRAP'
+#!/bin/sh
+# xenv — a git-backed secrets vault (https://github.com/ahoward/xenv).
+#
+# THIS FILE IS GENERATED — edit bin/xenv.go and run bin/build-polyglot.
+#
+# It is a polyglot: a POSIX bootstrap PLUS the tool's Go source carried as
+# text below the marker. On run the bootstrap execs a cached native binary,
+# compiling it from the embedded source on first run. So what lives in your
+# repo is readable, auditable text; what runs is a fast, dependency-free
+# binary. No openssl, no runtime deps.
+#
+# Resolution order:
+#   1. $XENV_BIN            — an explicit binary path (dev / vendored static)
+#   2. cached build         — ~/.cache/xenv/, keyed by this file's checksum
+#   3. compile embedded Go  — needs `go` (brew install go); cached for next time
+#   4. prebuilt release      — xenv-<os>-<arch> next to this file
+#   5. friendly error
+set -u
+
+self=$0
+case "$self" in
+  /*) : ;;
+  */*) self=$(cd "$(dirname "$self")" 2>/dev/null && pwd)/$(basename "$self") ;;
+  *) p=$(command -v "$self" 2>/dev/null) || p=; [ -n "$p" ] && self=$p ;;
+esac
+
+if [ -n "${XENV_BIN:-}" ]; then
+  exec "$XENV_BIN" "$@"
+fi
+
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/xenv"
+arch=$(uname -m 2>/dev/null || echo unknown)
+osname=$(uname -s 2>/dev/null || echo unknown)
+sig=$(cksum "$self" 2>/dev/null | awk '{print $1 "-" $2}')
+bin="$cache_dir/xenv-${sig:-nosig}-$osname-$arch"
+
+if [ -x "$bin" ]; then
+  exec "$bin" "$@"
+fi
+
+if command -v go >/dev/null 2>&1; then
+  mkdir -p "$cache_dir" 2>/dev/null || true
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/xenv-build.XXXXXXXX") || { echo "xenv: mktemp failed" >&2; exit 1; }
+  awk '/^#### XENV-GO-END ####$/{f=0} f; /^#### XENV-GO-BEGIN ####$/{f=1}' "$self" > "$tmp/xenv.go"
+  if GO111MODULE=auto go build -o "$bin.tmp.$$" "$tmp/xenv.go" 2>"$tmp/err"; then
+    mv "$bin.tmp.$$" "$bin" 2>/dev/null || true
+    rm -rf "$tmp"
+    exec "$bin" "$@"
+  fi
+  sed 's/^/xenv: build: /' "$tmp/err" >&2
+  rm -rf "$tmp"
+  echo "xenv: failed to compile embedded source" >&2
+  exit 1
+fi
+
+prebuilt=$(dirname "$self")/xenv-$osname-$arch
+[ -x "$prebuilt" ] && exec "$prebuilt" "$@"
+
+echo "xenv: first run needs a Go toolchain to compile (e.g. 'brew install go')," >&2
+echo "      or a prebuilt binary. Options:" >&2
+echo "        - install go, then re-run (compiles once, caches thereafter)" >&2
+echo "        - download a release: https://github.com/ahoward/xenv/releases" >&2
+echo "        - point \$XENV_BIN at an xenv binary you already have" >&2
+exit 1
+
+# ─────────────────────────────────────────────────────────────────────
+# The shell never reaches past here (it exec'd or exit'd above). Below is
+# the tool's Go source, carried verbatim and compiled on first run.
+#### XENV-GO-BEGIN ####
+BOOTSTRAP
+
+# append the Go source, then the end marker
+cat "$src" >> "$tmp"
+printf '#### XENV-GO-END ####\n' >> "$tmp"
+
+# atomic install + executable
+chmod +x "$tmp"
+mv "$tmp" "$out"
+trap - EXIT INT TERM HUP
+echo "build-polyglot: wrote $out ($(wc -l < "$out") lines)"
