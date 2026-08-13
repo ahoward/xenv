@@ -38,6 +38,21 @@ jobs:
       - name: run tests under /bin/sh
         run: test/run.sh
 
+  freebsd:
+    runs-on: ubuntu-latest
+    name: xenv core tests (FreeBSD / BSD userland)
+    steps:
+      - uses: actions/checkout@v4
+      # Real BSD /bin/sh (Almquist) + BSD coreutils + FreeBSD base OpenSSL 3.x,
+      # in a VM. Covers the *BSD target that macOS (Mach/BSD-ish) doesn't fully.
+      - name: run tests in a FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          run: |
+            openssl version
+            sh test/run.sh
+
   alpine:
     runs-on: ubuntu-latest
     name: xenv core tests (Alpine / busybox ash + openssl)
