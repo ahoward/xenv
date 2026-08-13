@@ -96,6 +96,19 @@ test_version() {
   case "$(xenv version)" in xenv\ *) return 0 ;; *) return 1 ;; esac
 }
 
+test_version_json_probe() {
+  # `xenv version --json` is a machine-readable capability probe (no crypto,
+  # so it works with no usable openssl). Stable schema: tool, wire_read/write,
+  # kdf, cipher, mac, features.
+  out=$(xenv version --json) || return 1
+  case "$out" in '{'*'}') ;; *) return 1 ;; esac
+  [ "$(printf '%s\n' "$out" | wc -l)" -eq 1 ] || return 1
+  for needle in '"tool":"xenv"' '"wire_write":"v5"' '"cipher":"aes-256-cbc"' \
+                '"mac":"hmac-sha256"' '"json-base64"'; do
+    case "$out" in *"$needle"*) ;; *) return 1 ;; esac
+  done
+}
+
 test_openssl_override_is_used() {
   # $XENV_OPENSSL points the tool at a specific openssl; a round-trip
   # through it proves the override is honored (not just PATH's openssl).
@@ -1356,6 +1369,7 @@ test_set_after_unset() {
 printf 'xenv test suite (shell: %s)\n\n' "$SHELL_BIN"
 
 run_test "version"                                  test_version
+run_test "version --json capability probe"          test_version_json_probe
 run_test "XENV_OPENSSL override is used"            test_openssl_override_is_used
 run_test "LibreSSL-only box fails cleanly"          test_openssl_libressl_only_fails_cleanly
 

@@ -91,6 +91,7 @@ xenv @<env> --json-base64              # like --json but values base64 (binary-s
 xenv @<env> --dotenv                    # print a dotenv-safe .env (fast-load cache)
 
 xenv help | version
+xenv version --json                    # machine-readable capability probe
 ```
 
 The `@<env>` token may appear **anywhere** in argv. These are equivalent:
@@ -205,7 +206,7 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` **3.0+**, `awk`, 
 > Binary-safe `--json` (alias `--json-b64`): identical flat `{"KEY":"..."}` shape, but every value is base64-encoded, so arbitrary bytes round-trip losslessly. No in-band marker — you chose this endpoint, so decode every value (an empty value is `""`). Use it for keyfiles/certs/tokens; use plain `--json` for text.
 
 `help`, `version`
-> What they say.
+> What they say. `version --json` emits a machine-readable **capability probe** — `{"tool":"xenv","version":...,"wire_read":["v3","v4","v5"],"wire_write":"v5","kdf":"pbkdf2-sha256","cipher":"aes-256-cbc","mac":"hmac-sha256","features":[...]}` — so an agent or loader can negotiate what this build reads/writes instead of guessing. Needs no crypto (works with no usable openssl). Schema is add-only/stable.
 
 ## ENVIRONMENT
 

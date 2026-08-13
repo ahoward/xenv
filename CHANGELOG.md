@@ -11,6 +11,13 @@ the changes that affect users.
 
 ### Added
 
+- **`xenv version --json` — capability probe.** Machine-readable, stable
+  (add-only) schema so an agent or loader can negotiate instead of guessing:
+  `{"tool":"xenv","version":"…","wire_read":["v3","v4","v5"],"wire_write":"v5",
+  "kdf":"pbkdf2-sha256","kdf_expand":"hkdf-sha256","cipher":"aes-256-cbc",
+  "padding":"pkcs7","mac":"hmac-sha256","features":[…]}`. `wire_read` is what
+  this build decrypts; `wire_write` is what `set`/`edit`/rotation emit. Needs
+  no crypto (works with no usable openssl). Resolves #22.
 - **`xenv @<env> --json-base64` — binary-safe JSON dump** (alias
   `--json-b64`). `--json` is text/UTF-8 only: a raw-bytes value (keyfile,
   binary token, non-UTF-8) cannot round-trip as a JSON string.
@@ -24,6 +31,17 @@ the changes that affect users.
 ### Changed
 
 - `--json` documented as text/UTF-8 only (behavior unchanged).
+
+### Docs
+
+- **`AGENTS.md`** — canonical machine-facing entry doc (detect → resolve the
+  binary → probe → load → passphrase → verify), mirroring the site
+  `llms.txt`. Resolves #24.
+- **Binary-resolution order** documented (`$XENV_BIN` → `./xenv/bin/xenv` →
+  `xenv` on `$PATH` → opt-in pinned fetch), with `sh`/`python` reference
+  resolvers in `AGENTS.md` and a note in `llms.txt`. Partially addresses #20
+  (the opt-in `$XENV_AUTOFETCH` fetch is spec'd but not wired — it needs
+  published releases).
 
 ## [0.18.0-posix] — 2026-08-11
 

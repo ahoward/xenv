@@ -76,6 +76,18 @@ several (`production`, `staging`, …). To choose which to load: if there is
 exactly one, that is the default (and `@<env>` is optional); otherwise pick
 by name.
 
+## resolve the binary, then probe it
+
+Find the `xenv` binary in this order: `$XENV_BIN` → `./xenv/bin/xenv`
+(vendored) → `xenv` on `$PATH`. (An opt-in pinned+sha256 fetch under
+`$XENV_AUTOFETCH` is reserved but not yet wired.) Then negotiate, don't guess:
+
+    xenv version --json
+    → {"tool":"xenv","wire_read":["v3","v4","v5"],"wire_write":"v5",
+       "cipher":"aes-256-cbc","mac":"hmac-sha256","features":[...]}
+
+This needs no crypto, so it works even where openssl is missing.
+
 ## load an env — the thing you almost always want
 
     xenv @<env> --json   →   {"KEY":"value", ...}   (one JSON object)
