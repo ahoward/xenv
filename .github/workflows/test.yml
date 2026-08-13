@@ -23,6 +23,24 @@ jobs:
       - name: run tests under /usr/bin/dash
         run: SHELL_BIN=/usr/bin/dash test/run.sh
 
+  alpine:
+    runs-on: ubuntu-latest
+    name: xenv core tests (Alpine / busybox ash + openssl)
+    steps:
+      - uses: actions/checkout@v4
+      # Run the suite inside Alpine so it's exercised under BusyBox ash +
+      # BusyBox coreutils (awk/od/mktemp/cksum) + Alpine's OpenSSL 3.x — the
+      # minimal-container target. `docker run` keeps checkout's node action on
+      # the host (an Alpine job container would lack node for the action).
+      - name: run tests under busybox ash in Alpine
+        run: |
+          docker run --rm -v "$PWD":/x:ro -w /x alpine:latest sh -c '
+            apk add --no-cache openssl >/dev/null
+            echo "openssl: $(openssl version)"
+            echo "shell:  $(/bin/busybox | head -1)"
+            sh test/run.sh
+          '
+
   recipes:
     runs-on: ubuntu-latest
     name: recipe round-trip tests (python, node, ruby, go, rust, php, java, csharp, elixir)

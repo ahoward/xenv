@@ -32,6 +32,12 @@ the changes that affect users.
 
 - `--json` documented as text/UTF-8 only (behavior unchanged).
 
+### Tests
+
+- **Alpine / busybox CI job.** The core suite now runs in Alpine (BusyBox
+  `ash` + BusyBox coreutils + Alpine's OpenSSL 3.x) on every push, proving
+  the minimal-container target. 114/114 green. Resolves #11.
+
 ### Docs
 
 - **`AGENTS.md`** — canonical machine-facing entry doc (detect → resolve the
