@@ -31,7 +31,7 @@ jobs:
       # macOS ships LibreSSL as /usr/bin/openssl (no `openssl kdf`); the tool
       # must auto-detect a real OpenSSL 3.x (Homebrew's openssl@3). This job
       # exercises that path on genuine hardware.
-      - name: default openssl (expected: LibreSSL)
+      - name: "default openssl (expected LibreSSL)"
         run: /usr/bin/openssl version || true
       - name: ensure openssl@3 (brew)
         run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
