@@ -15,13 +15,14 @@
 # both XENV_INSTALL_VERSION and XENV_INSTALL_SHA256.
 set -eu
 
-VERSION="${XENV_INSTALL_VERSION:-v0.19.0}"
+VERSION="${XENV_INSTALL_VERSION:-v0.20.0}"
 INSTALL_DIR="${XENV_INSTALL_DIR:-$HOME/.local/bin}"
 REPO="ahoward/xenv"
 
 # pinned sha256 of bin/xenv at each release tag (append on release)
 sha_for() {
   case "$1" in
+    v0.20.0) echo "5a7f0c83cf73f66290f892a5480ef64e30469c9201d7c8c873e1cf4e245e068e" ;;
     v0.19.0) echo "67b3c89b1d41db5144b6c6d14d3444d7e9de5ed81842ef7c915fee74e13c16b7" ;;
     *)       echo "" ;;
   esac
