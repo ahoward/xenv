@@ -124,6 +124,13 @@ test_openssl_libressl_only_fails_cleanly() {
   # `openssl` reports LibreSSL and no openssl3/brew keg exists. A crypto
   # verb must fail with a clear "OpenSSL 3.0+" message — never a cryptic
   # kdf error — while version (no crypto) still works.
+  #
+  # Can't simulate "no usable openssl" where a Homebrew keg exists OUTSIDE
+  # PATH — the resolver finds it regardless (real macOS runners). Skip there;
+  # Linux/Alpine CI (no keg) exercises this path.
+  for keg in /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl; do
+    [ -x "$keg" ] && return 0
+  done
   xenv setup development >/dev/null 2>&1
   xenv set @development OK=v >/dev/null 2>&1
   fake="$TMP/fakebin"
@@ -657,7 +664,8 @@ test_run_preserves_multiline() {
 line2
 line3'
   printf '%s' "$pem" | xenv set @production PEM >/dev/null 2>&1
-  lines=$(xenv run @production sh -c 'printf "%s" "$PEM"' | wc -l)
+  # tr -d: BSD `wc -l` pads with leading spaces; strip for a string compare.
+  lines=$(xenv run @production sh -c 'printf "%s" "$PEM"' | wc -l | tr -d '[:space:]')
   assert_eq "2" "$lines" "multi-line preserved"
 }
 
@@ -1222,16 +1230,21 @@ test_partial_encrypt_failure_preserves() {
   orig=$(cat xenv/envs/production/APP_ENV.value.enc)
 
   mkdir "$TMP/badbin"
-  cat > "$TMP/badbin/openssl" <<EOF
+  # A fake openssl that the resolver ACCEPTS (reports OpenSSL 3.x) but that
+  # fails key derivation, so `set` aborts mid-write and must leave the
+  # original file untouched. Reporting a real 3.x version is essential: on
+  # macOS the resolver rejects anything that isn't "OpenSSL 3/4", and would
+  # otherwise fall through to a real keg openssl and succeed.
+  cat > "$TMP/badbin/openssl" <<'EOF'
 #!/bin/sh
-if [ "\${1:-}" = "enc" ]; then
-  case "\$*" in *-d*) exec /usr/bin/openssl "\$@" ;; esac
-  exit 1
-fi
-exec /usr/bin/openssl "\$@"
+case "${1:-}" in
+  version) echo "OpenSSL 3.0.0 (fake)"; exit 0 ;;
+  kdf)     exit 1 ;;
+  *)       exec /usr/bin/openssl "$@" ;;
+esac
 EOF
   chmod +x "$TMP/badbin/openssl"
-  PATH="$TMP/badbin:$PATH" xenv set @production APP_ENV=newvalue >/dev/null 2>&1
+  PATH="$TMP/badbin:$PATH" XENV_OPENSSL= xenv set @production APP_ENV=newvalue >/dev/null 2>&1
 
   now=$(cat xenv/envs/production/APP_ENV.value.enc)
   assert_eq "$orig" "$now" "encrypt failure preserves original"
@@ -1245,7 +1258,7 @@ test_each_value_is_own_file() {
   xenv set @production BETA=2 >/dev/null 2>&1
   xenv set @production GAMMA=3 >/dev/null 2>&1
   # APP_ENV + 3 new = 4
-  count=$(ls xenv/envs/production/*.value.enc 2>/dev/null | wc -l)
+  count=$(ls xenv/envs/production/*.value.enc 2>/dev/null | wc -l | tr -d '[:space:]')
   assert_eq "4" "$count" "four values, four files"
 }
 
