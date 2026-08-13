@@ -30,6 +30,11 @@ pandoc "$ROOT/README.md" \
 
 cp "$SITE/style.css" "$DIST/style.css"
 
+# the pinned, checksummed installer, served at xenv.sh/install:
+#   curl -fsSL https://xenv.sh/install | sh
+cp "$SITE/install.sh" "$DIST/install"
+chmod +x "$DIST/install"
+
 # tiny robots + a llms.txt so AI crawlers know what this project is.
 # (machine-readable summary aimed at coding agents, not just web bots.)
 cat > "$DIST/robots.txt" <<'EOF'

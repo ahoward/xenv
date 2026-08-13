@@ -32,6 +32,16 @@ the changes that affect users.
 
 - `--json` documented as text/UTF-8 only (behavior unchanged).
 
+### Tooling
+
+- **Pinned, checksummed installer** served at `xenv.sh/install`:
+  `curl -fsSL https://xenv.sh/install | sh`. Fetches a pinned release tag and
+  verifies its sha256 **before** writing `xenv` to disk (default
+  `~/.local/bin`, override `$XENV_INSTALL_DIR`) — remote code is never piped
+  to a shell. Aborts on any checksum mismatch. Resolves #21; provides the
+  pinned+verified fetch primitive an opt-in `$XENV_AUTOFETCH` (#20) can build
+  on. (Site artifact; the tool script itself is unchanged.)
+
 ### Tests
 
 - **Alpine / busybox CI job.** The core suite now runs in Alpine (BusyBox

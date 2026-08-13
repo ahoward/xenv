@@ -273,7 +273,16 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` **3.0+**, `awk`, 
 
 ## EXAMPLES
 
-Install:
+Install — pinned + checksummed (non-interactive):
+
+```sh
+curl -fsSL https://xenv.sh/install | sh          # → ~/.local/bin/xenv (sha256-verified)
+curl -fsSL https://xenv.sh/install | XENV_INSTALL_DIR=/usr/local/bin sh
+```
+
+The installer fetches a **pinned release** and verifies its sha256 before
+writing it to disk — it never pipes remote code to a shell. Or just vendor it
+(it's one file, safe to commit into your repo):
 
 ```sh
 git clone https://github.com/ahoward/xenv && cp xenv/bin/xenv ~/bin/ && chmod +x ~/bin/xenv

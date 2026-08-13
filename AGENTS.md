@@ -28,9 +28,11 @@ case) → it is the default and `@<env>` is optional; several → pick by name
 1. `$XENV_BIN`              — explicit path, always wins
 2. `./xenv/bin/xenv`        — the vendored copy `xenv setup` writes into the repo
 3. `xenv` on `$PATH`
-4. **opt-in** pinned fetch  — only if `$XENV_AUTOFETCH=1`; a pinned version,
-   sha256-verified, cached in `~/.cache/xenv/`. Never silent, never on import.
-   *(spec only — not wired until releases are published.)*
+4. **opt-in** install/fetch — humans: `curl -fsSL https://xenv.sh/install | sh`
+   (pinned release, sha256-verified before it touches disk). An automated
+   `$XENV_AUTOFETCH=1` resolver step (fetch → verify → cache in
+   `~/.cache/xenv/`, never silent, never on import) is spec'd but not yet
+   wired into loaders.
 
 Reference resolver — `sh`:
 
