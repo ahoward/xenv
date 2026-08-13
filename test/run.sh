@@ -114,8 +114,10 @@ test_openssl_override_is_used() {
   # through it proves the override is honored (not just PATH's openssl).
   xenv setup development >/dev/null 2>&1
   xenv set @development OK=v >/dev/null 2>&1
-  real=$(command -v openssl)
-  out=$(XENV_OPENSSL="$real" xenv get @development OK 2>&1) || return 1
+  # A known-good OpenSSL 3.x: prefer an already-resolved $XENV_OPENSSL (set on
+  # LibreSSL-base hosts like OpenBSD where PATH `openssl` is not 3.x).
+  real=${XENV_OPENSSL:-$(command -v openssl)}
+  out=$( XENV_OPENSSL="$real" xenv get @development OK 2>&1 ) || return 1
   assert_eq "v" "$out" "XENV_OPENSSL override decrypts"
 }
 

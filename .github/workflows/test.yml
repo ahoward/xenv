@@ -53,6 +53,55 @@ jobs:
             openssl version
             sh test/run.sh
 
+  netbsd:
+    runs-on: ubuntu-latest
+    name: xenv core tests (NetBSD / BSD userland)
+    # Non-blocking until proven green (VM userland can surface new BSD-isms).
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      # NetBSD base ships OpenSSL 3.x, so detection finds it on PATH.
+      - name: run tests in a NetBSD VM
+        uses: vmactions/netbsd-vm@v1
+        with:
+          usesh: true
+          run: |
+            openssl version
+            sh test/run.sh
+
+  openbsd:
+    runs-on: ubuntu-latest
+    name: xenv core tests (OpenBSD / LibreSSL base + pkg openssl)
+    # Non-blocking until proven green.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      # OpenBSD ships LibreSSL as base (no `openssl kdf`); install a pkg
+      # OpenSSL 3.x and point $XENV_OPENSSL at it — the recommended OpenBSD
+      # usage (mirrors the macOS story, but with no Homebrew keg to autodetect).
+      - name: run tests in an OpenBSD VM
+        uses: vmactions/openbsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg_add -I openssl
+          run: |
+            echo "base: $(/usr/bin/openssl version)"   # LibreSSL
+            XENV_OPENSSL=""
+            for c in /usr/local/bin/eopenssl35 /usr/local/bin/eopenssl34 \
+                     /usr/local/bin/eopenssl33 /usr/local/bin/openssl \
+                     openssl3 openssl; do
+              command -v "$c" >/dev/null 2>&1 || [ -x "$c" ] || continue
+              case "$("$c" version 2>/dev/null)" in
+                "OpenSSL 3."*|"OpenSSL 4."*) XENV_OPENSSL="$c"; break ;;
+              esac
+            done
+            export XENV_OPENSSL
+            echo "XENV_OPENSSL=${XENV_OPENSSL:-<none found>}"
+            [ -n "$XENV_OPENSSL" ] || { echo "no OpenSSL 3.x from pkg"; exit 1; }
+            "$XENV_OPENSSL" version
+            sh test/run.sh
+
   alpine:
     runs-on: ubuntu-latest
     name: xenv core tests (Alpine / busybox ash + openssl)
