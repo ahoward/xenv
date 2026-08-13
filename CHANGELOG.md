@@ -7,6 +7,29 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.20.0-posix] — 2026-08-13
+
+Cross-platform portability, now proven in CI on every push.
+
+### Portability / Tests
+
+- **Full platform CI matrix — all required (blocking):** Linux glibc
+  (`sh` + `dash`), Alpine musl/BusyBox `ash`, macOS (LibreSSL default +
+  Homebrew `openssl@3`, via auto-detection), **FreeBSD**, **NetBSD**, and
+  **OpenBSD** (LibreSSL base + a pkg `openssl` via `$XENV_OPENSSL`) — plus
+  the nine-language recipe round-trips. Resolves #9, #10, #11.
+- The **tool needed zero changes** to pass on all six OS/libc/shell/openssl
+  combinations — it was already portable. The work was hardening the *test
+  suite* against shell/coreutils differences: `VAR=val funcname` export and
+  persistence semantics on FreeBSD/OpenBSD `/bin/sh`, `sh -c … -- x`
+  `--`-as-`$0`, BSD `wc -l` padding, and OpenBSD `grep` rejecting `\|` BRE
+  alternation (→ `grep -E`).
+
+### Tooling
+
+- The pinned, checksummed installer (`xenv.sh/install`) now defaults to
+  **v0.20.0** (with this release's sha256).
+
 ## [0.19.0-posix] — 2026-08-13
 
 ### Added
