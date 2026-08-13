@@ -1266,7 +1266,11 @@ case "${1:-}" in
 esac
 EOF
   chmod +x "$TMP/badbin/openssl"
-  PATH="$TMP/badbin:$PATH" XENV_OPENSSL= xenv set @production APP_ENV=newvalue >/dev/null 2>&1
+  # subshell: `VAR=val funcname` PERSISTS after the function on POSIX-strict
+  # shells (OpenBSD /bin/sh), so a bare `XENV_OPENSSL= xenv …` would leak an
+  # empty override into every later test. Contain it.
+  ( PATH="$TMP/badbin:$PATH"; XENV_OPENSSL=; export PATH XENV_OPENSSL
+    xenv set @production APP_ENV=newvalue >/dev/null 2>&1 )
 
   now=$(cat xenv/envs/production/APP_ENV.value.enc)
   assert_eq "$orig" "$now" "encrypt failure preserves original"
