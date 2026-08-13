@@ -436,8 +436,9 @@ test_no_top_readme_means_no_key_lookup() {
   printf 'xenv:v3:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n' \
     > xenv/envs/production/APP_ENV.value.enc
 
-  out=$(xenv get @production APP_ENV 2>&1) && { echo "  (DIAG unexpected success: [$out]) XENV_KEY=[${XENV_KEY:-}] XENV_KEY_PRODUCTION=[${XENV_KEY_PRODUCTION:-}]" >&2; return 1; }
-  echo "$out" | grep -qi "no key\|run 'xenv setup'\|README\.md" || { echo "  (DIAG got: [$out])" >&2; return 1; }
+  out=$(xenv get @production APP_ENV 2>&1) && return 1
+  # grep -E (ERE): OpenBSD grep doesn't support `\|` BRE alternation.
+  printf '%s\n' "$out" | grep -qiE "no key|run 'xenv setup'|README\.md" || return 1
   return 0
 }
 
@@ -1127,8 +1128,9 @@ test_wrong_key_fails_mac() {
   # Decrypt under that key should fail MAC.
   xenv setup testing development staging production >/dev/null 2>&1
   echo "wrongkeywrongkeywrongkeywrongkey=" > "$(project_keys_dir)/_global.key"
-  out=$(xenv get @production APP_ENV 2>&1) && { echo "  (DIAG unexpected success: [$out]) XENV_KEY=[${XENV_KEY:-}] XENV_KEY_PRODUCTION=[${XENV_KEY_PRODUCTION:-}] keydir=[$(project_keys_dir)]" >&2; return 1; }
-  echo "$out" | grep -qi "MAC verification\|wrong key" || { echo "  (DIAG got: [$out])" >&2; return 1; }
+  out=$(xenv get @production APP_ENV 2>&1) && return 1
+  # grep -E (ERE): OpenBSD grep doesn't support `\|` BRE alternation.
+  printf '%s\n' "$out" | grep -qiE "MAC verification|wrong key" || return 1
 }
 
 test_env_var_beats_file_backend() {

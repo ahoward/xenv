@@ -56,8 +56,6 @@ jobs:
   netbsd:
     runs-on: ubuntu-latest
     name: xenv core tests (NetBSD / BSD userland)
-    # Non-blocking until proven green (VM userland can surface new BSD-isms).
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       # NetBSD base ships OpenSSL 3.x, so detection finds it on PATH.
@@ -72,8 +70,6 @@ jobs:
   openbsd:
     runs-on: ubuntu-latest
     name: xenv core tests (OpenBSD / LibreSSL base + pkg openssl)
-    # Non-blocking until proven green.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       # OpenBSD ships LibreSSL as base (no `openssl kdf`); install a pkg
