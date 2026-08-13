@@ -200,7 +200,11 @@ test_setup_honors_global_env_var() {
   # $XENV_KEY pinned at setup time → that value becomes _global.key.
   # Subsequent decrypts work both with and without the env var set.
   pinned='my-shared-passphrase'
-  XENV_KEY=$pinned xenv setup testing development staging production >/dev/null 2>&1
+  # subshell + export: `VAR=val funcname` does not export VAR to the
+  # function's child process on FreeBSD /bin/sh (unlike bash/dash). The
+  # `xenv` harness IS a function, so export explicitly. Real usage —
+  # `VAR=val <the xenv binary>` — is an external command and always exports.
+  ( export XENV_KEY="$pinned"; xenv setup testing development staging production >/dev/null 2>&1 )
   kdir=$(project_keys_dir)
   [ -f "$kdir/_global.key" ] || return 1
   cached=$(cat "$kdir/_global.key")
@@ -214,7 +218,7 @@ test_setup_honors_per_env_var() {
   # $XENV_KEY_<ENV> pinned at setup → per-env file gets that value.
   # The OTHER envs still get a generated _global.key.
   pinned='prod-specific-key'
-  XENV_KEY_PRODUCTION=$pinned xenv setup testing development staging production >/dev/null 2>&1
+  ( export XENV_KEY_PRODUCTION="$pinned"; xenv setup testing development staging production >/dev/null 2>&1 )
   kdir=$(project_keys_dir)
   [ -f "$kdir/production.key" ] || return 1
   [ -f "$kdir/_global.key" ]    || return 1
@@ -686,6 +690,20 @@ test_run_no_env_fails() {
   return 0
 }
 
+test_run_passes_double_dash_through() {
+  # The tool must pass a literal `--` in the command's argv through
+  # unchanged (the argv prescan must not drop it). Uses an args-dumper so
+  # the check is independent of any `sh -c` end-of-options handling.
+  xenv setup testing development staging production >/dev/null 2>&1
+  cat > "$TMP/args.sh" <<'EOF'
+#!/bin/sh
+for a in "$@"; do printf '[%s]' "$a"; done
+EOF
+  chmod +x "$TMP/args.sh"
+  out=$(xenv @production "$TMP/args.sh" a -- b)
+  assert_eq "[a][--][b]" "$out" "run passes a literal -- through to the command"
+}
+
 test_run_exports_xenv_loaded() {
   # `xenv run` marks the process with $XENV_LOADED=<resolved env>, so a child
   # can ask "am I loaded, and as what" instead of sniffing side effects.
@@ -873,9 +891,11 @@ test_json_base64_needs_env() {
 
 test_json_flag_not_eaten_by_run() {
   # When @env has a CMD, a trailing --json is an argument to that CMD,
-  # not xenv's dump flag.
+  # not xenv's dump flag. Use an explicit command-name ($0) so $1 is --json
+  # without relying on `sh -c … -- …` (FreeBSD sh treats that -- as its own
+  # end-of-options).
   xenv setup testing development staging production >/dev/null 2>&1
-  out=$(xenv @development sh -c 'printf %s "$1"' -- --json 2>&1) || return 1
+  out=$(xenv @development sh -c 'printf %s "$1"' sh --json 2>&1) || return 1
   assert_eq "--json" "$out" "--json passes through to the run command"
 }
 
@@ -935,7 +955,7 @@ test_dotenv_dump_needs_env() {
 test_dotenv_flag_not_eaten_by_run() {
   # When @env has a CMD, a trailing --dotenv is an argument to that CMD.
   xenv setup testing development staging production >/dev/null 2>&1
-  out=$(xenv @development sh -c 'printf %s "$1"' -- --dotenv 2>&1) || return 1
+  out=$(xenv @development sh -c 'printf %s "$1"' sh --dotenv 2>&1) || return 1
   assert_eq "--dotenv" "$out" "--dotenv passes through to the run command"
 }
 
@@ -1041,7 +1061,7 @@ test_edit_round_trip() {
 printf 'changed' > "$1"
 EOF
   chmod +x "$TMP/ed.sh"
-  EDITOR="$TMP/ed.sh" xenv edit @production APP_ENV >/dev/null 2>&1
+  ( export EDITOR="$TMP/ed.sh"; xenv edit @production APP_ENV >/dev/null 2>&1 )
   out=$(xenv get @production APP_ENV)
   assert_eq "changed" "$out" "edit changes value"
 }
@@ -1055,7 +1075,7 @@ test_edit_no_changes_skipped() {
 exit 0
 EOF
   chmod +x "$TMP/noop.sh"
-  EDITOR="$TMP/noop.sh" xenv edit @production APP_ENV >/dev/null 2>&1
+  ( export EDITOR="$TMP/noop.sh"; xenv edit @production APP_ENV >/dev/null 2>&1 )
   after=$(stat -c %Y xenv/envs/production/APP_ENV.value.enc 2>/dev/null \
           || stat -f %m xenv/envs/production/APP_ENV.value.enc 2>/dev/null)
   assert_eq "$before" "$after" "no-op edit doesn't touch file"
@@ -1068,7 +1088,7 @@ test_edit_creates_new_key() {
 printf 'created' > "$1"
 EOF
   chmod +x "$TMP/ed.sh"
-  EDITOR="$TMP/ed.sh" xenv edit @production NEWKEY >/dev/null 2>&1
+  ( export EDITOR="$TMP/ed.sh"; xenv edit @production NEWKEY >/dev/null 2>&1 )
   out=$(xenv get @production NEWKEY)
   assert_eq "created" "$out" "edit creates new key"
 }
@@ -1111,7 +1131,7 @@ test_wrong_key_fails_mac() {
 
 test_env_var_beats_file_backend() {
   xenv setup testing development staging production >/dev/null 2>&1
-  XENV_KEY_PRODUCTION="wrongkey" xenv get @production APP_ENV >/dev/null 2>&1 && return 1
+  ( export XENV_KEY_PRODUCTION="wrongkey"; xenv get @production APP_ENV >/dev/null 2>&1 ) && return 1
   return 0
 }
 
@@ -1445,6 +1465,7 @@ run_test "run injects env"                          test_run_injects_env
 run_test "run preserves multi-line"                 test_run_preserves_multiline
 run_test "run propagates exit code"                 test_run_propagates_exit_code
 run_test "run no command fails"                     test_run_no_command_fails
+run_test "run passes literal -- through"            test_run_passes_double_dash_through
 run_test "run exports XENV_LOADED"                  test_run_exports_xenv_loaded
 run_test "nested run overwrites XENV_LOADED"        test_run_nested_overwrites_xenv_loaded
 run_test "--dotenv includes XENV_LOADED last"       test_dotenv_includes_loaded_marker_last
