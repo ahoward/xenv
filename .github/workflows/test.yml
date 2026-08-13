@@ -23,6 +23,21 @@ jobs:
       - name: run tests under /usr/bin/dash
         run: SHELL_BIN=/usr/bin/dash test/run.sh
 
+  macos:
+    runs-on: macos-latest
+    name: xenv core tests (macOS / LibreSSL default + brew openssl@3)
+    steps:
+      - uses: actions/checkout@v4
+      # macOS ships LibreSSL as /usr/bin/openssl (no `openssl kdf`); the tool
+      # must auto-detect a real OpenSSL 3.x (Homebrew's openssl@3). This job
+      # exercises that path on genuine hardware.
+      - name: default openssl (expected: LibreSSL)
+        run: /usr/bin/openssl version || true
+      - name: ensure openssl@3 (brew)
+        run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
+      - name: run tests under /bin/sh
+        run: test/run.sh
+
   alpine:
     runs-on: ubuntu-latest
     name: xenv core tests (Alpine / busybox ash + openssl)
