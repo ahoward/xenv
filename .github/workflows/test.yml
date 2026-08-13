@@ -84,14 +84,14 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkg_add -I openssl
+            pkg_add -I openssl%3.5
           run: |
             echo "base: $(/usr/bin/openssl version)"   # LibreSSL
             XENV_OPENSSL=""
-            for c in /usr/local/bin/eopenssl35 /usr/local/bin/eopenssl34 \
-                     /usr/local/bin/eopenssl33 /usr/local/bin/openssl \
-                     openssl3 openssl; do
-              command -v "$c" >/dev/null 2>&1 || [ -x "$c" ] || continue
+            # the OpenBSD openssl package installs versioned binaries
+            # (e.g. /usr/local/bin/eopenssl35); pick the first 3.x/4.x one.
+            for c in /usr/local/bin/eopenssl* /usr/local/bin/openssl*; do
+              [ -x "$c" ] || continue
               case "$("$c" version 2>/dev/null)" in
                 "OpenSSL 3."*|"OpenSSL 4."*) XENV_OPENSSL="$c"; break ;;
               esac
