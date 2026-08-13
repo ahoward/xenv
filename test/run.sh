@@ -820,6 +820,36 @@ test_json_dump_needs_env() {
   echo "$out" | grep -qi "needs an env" || return 1
 }
 
+test_json_base64_round_trips_binary() {
+  # --json is text/UTF-8 only; raw non-UTF-8 bytes corrupt it. --json-base64
+  # base64-encodes every value so arbitrary bytes round-trip losslessly.
+  xenv setup testing development staging production >/dev/null 2>&1
+  # ff fe 80 81 — invalid UTF-8, no NUL (shell vars can't carry NUL)
+  printf '\377\376\200\201' | xenv set @production BIN >/dev/null 2>&1
+  out=$(xenv @production --json-base64) || return 1
+  b64=$(printf '%s' "$out" | sed -n 's/.*"BIN":"\([^"]*\)".*/\1/p')
+  [ -n "$b64" ] || return 1
+  got=$(printf '%s' "$b64" | openssl base64 -d -A | od -An -tx1 | tr -d ' \n')
+  assert_eq "fffe8081" "$got" "binary round-trips through --json-base64"
+}
+
+test_json_base64_ascii_decodes() {
+  # An ASCII value base64-decodes back to the same bytes --json would emit.
+  xenv setup testing development staging production >/dev/null 2>&1
+  xenv set @production HELLO=world >/dev/null 2>&1
+  out=$(xenv @production --json-base64) || return 1
+  b64=$(printf '%s' "$out" | sed -n 's/.*"HELLO":"\([^"]*\)".*/\1/p')
+  got=$(printf '%s' "$b64" | openssl base64 -d -A)
+  assert_eq "world" "$got" "ascii value decodes from --json-base64"
+}
+
+test_json_base64_needs_env() {
+  # --json-base64 with no @env is an error.
+  xenv setup testing development staging production >/dev/null 2>&1
+  out=$(xenv --json-base64 2>&1) && return 1
+  echo "$out" | grep -qi "needs an env" || return 1
+}
+
 test_json_flag_not_eaten_by_run() {
   # When @env has a CMD, a trailing --json is an argument to that CMD,
   # not xenv's dump flag.
@@ -1403,6 +1433,9 @@ run_test "@env --json is position-independent"      test_json_dump_position_inde
 run_test "@env --json escapes special chars"        test_json_dump_escapes_special_chars
 run_test "@env --json empty env is {}"              test_json_dump_empty_env_is_braces
 run_test "@env --json needs an env"                 test_json_dump_needs_env
+run_test "@env --json-base64 binary round-trip"     test_json_base64_round_trips_binary
+run_test "@env --json-base64 ascii decodes"         test_json_base64_ascii_decodes
+run_test "@env --json-base64 needs an env"          test_json_base64_needs_env
 run_test "--json not eaten by run command"          test_json_flag_not_eaten_by_run
 run_test "@env --dotenv quotes values"              test_dotenv_dump_quotes_values
 run_test "@env --dotenv escapes \" and \\"           test_dotenv_dump_escapes_quote_and_backslash

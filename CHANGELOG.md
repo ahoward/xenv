@@ -7,6 +7,24 @@ uses an informal semver-ish scheme tagged in `bin/xenv`'s `XENV_VERSION`.
 The full audit trail of every change is in `git log` — this file is for
 the changes that affect users.
 
+## [0.19.0-posix] — 2026-08-13
+
+### Added
+
+- **`xenv @<env> --json-base64` — binary-safe JSON dump** (alias
+  `--json-b64`). `--json` is text/UTF-8 only: a raw-bytes value (keyfile,
+  binary token, non-UTF-8) cannot round-trip as a JSON string.
+  `--json-base64` emits the same flat `{"KEY":"..."}` shape but base64-encodes
+  every value, so arbitrary bytes round-trip losslessly. No in-band marker —
+  the endpoint IS the convention: you chose `--json-base64`, so decode every
+  value (empty value → `""`). The native recipes read `.value.enc` directly
+  and are already binary-safe; this only concerns the `--json` shell-out path.
+  Docs now state `--json` is text-only. Resolves #27.
+
+### Changed
+
+- `--json` documented as text/UTF-8 only (behavior unchanged).
+
 ## [0.18.0-posix] — 2026-08-11
 
 ### Added

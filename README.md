@@ -86,7 +86,8 @@ xenv edit   @<env> KEY
 xenv run    @<env> CMD [args]
 xenv @<env>      CMD [args]            # shorthand for run
 xenv @<env>                            # no CMD: print KEY=value lines
-xenv @<env> --json                     # print the env as one JSON object
+xenv @<env> --json                     # print the env as one JSON object (text/UTF-8)
+xenv @<env> --json-base64              # like --json but values base64 (binary-safe)
 xenv @<env> --dotenv                    # print a dotenv-safe .env (fast-load cache)
 
 xenv help | version
@@ -198,7 +199,10 @@ xenv is a POSIX shell script. It depends on `sh`, `openssl(1)` **3.0+**, `awk`, 
 > ruby   -rjson -e 'env=JSON.parse(`xenv @production --json`); puts env["DATABASE_URL"]'
 > ```
 >
-> An empty env dumps as `{}`. `--json` is a verb, so `@<env>` may sit before or after it. Values are byte-exact; control characters use JSON escapes (`\n`, `\t`, `\u00XX`).
+> An empty env dumps as `{}`. `--json` is a verb, so `@<env>` may sit before or after it. Values are byte-exact for **valid UTF-8**; control characters use JSON escapes (`\n`, `\t`, `\u00XX`). `--json` is **text-only** — a raw-bytes value (keyfile, binary token) can't round-trip as a JSON string.
+
+`@<env> --json-base64`
+> Binary-safe `--json` (alias `--json-b64`): identical flat `{"KEY":"..."}` shape, but every value is base64-encoded, so arbitrary bytes round-trip losslessly. No in-band marker — you chose this endpoint, so decode every value (an empty value is `""`). Use it for keyfiles/certs/tokens; use plain `--json` for text.
 
 `help`, `version`
 > What they say.

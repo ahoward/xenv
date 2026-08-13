@@ -84,7 +84,10 @@ If the repo has exactly one env, `@<env>` is optional — `xenv --json`
 resolves to the sole env. With several envs, name one (or set $XENV_ENV).
 
 Parse with any stdlib JSON parser. It is byte-exact and unambiguous for
-values containing '=', quotes, newlines, or whitespace. Do NOT read
+values containing '=', quotes, newlines, or whitespace. `--json` is
+text/UTF-8 only; for raw-bytes values (keyfiles, binary tokens) use
+`xenv @<env> --json-base64` — same flat shape, every value base64-encoded,
+decode each (no in-band marker; you chose the endpoint). Do NOT read
 `.value.enc` files directly and do NOT reimplement crypto when the `xenv`
 binary is present — shell out:
 

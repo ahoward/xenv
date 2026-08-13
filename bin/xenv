@@ -46,7 +46,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-XENV_VERSION="0.18.0-posix"
+XENV_VERSION="0.19.0-posix"
 XENV_DIR="xenv"
 XENV_VAULT_VERSION="v3"
 XENV_PROJECT_FORMAT="v1"
@@ -1231,7 +1231,9 @@ usage:
   xenv @<env>                        no CMD: print KEY=value lines
   xenv @<env> --json                 print the env as one JSON object
                                      (language-neutral; load with any
-                                     stdlib JSON parser)
+                                     stdlib JSON parser). text/UTF-8 only.
+  xenv @<env> --json-base64          like --json but every value is base64
+                                     (binary-safe: keyfiles, raw tokens)
   xenv @<env> --dotenv               print dotenv-safe KEY="value" lines.
                                      fast-load cache: dump once, let the
                                        app read plaintext with no crypto:
@@ -2186,6 +2188,7 @@ cmd_envdump() {
 cmd_envdump_json() {
   [ $# -ge 1 ] || die "envdump needs <env>"
   env_name=$1
+  enc=${2:-text}   # text | b64
 
   dir=$(env_dir "$env_name")
   [ -d "$dir" ] || die "no env '$env_name'"
@@ -2204,7 +2207,16 @@ cmd_envdump_json() {
     decrypt_envelope "$pp" "$ctx_salt" "$ctx_iter" "$env_okm" < "$f" > "$tmp" || die "decrypt failed for $name"
     [ "$first" -eq 1 ] || printf ','
     first=0
-    printf '%s:%s' "$(printf '%s' "$name" | json_string)" "$(json_string < "$tmp")"
+    if [ "$enc" = "b64" ]; then
+      # base64 mode (binary-safe): a value that is raw/non-UTF-8 bytes can't
+      # be a JSON string. Every value is base64 instead — its alphabet
+      # (A-Za-z0-9+/=) is already JSON-string-safe, so no escaping is
+      # needed. An empty value encodes to "". The caller chose this endpoint,
+      # so it decodes every value; there is no in-band marker.
+      printf '%s:"%s"' "$(printf '%s' "$name" | json_string)" "$(openssl base64 -A < "$tmp")"
+    else
+      printf '%s:%s' "$(printf '%s' "$name" | json_string)" "$(json_string < "$tmp")"
+    fi
   done
   printf '}\n'
 
@@ -2409,6 +2421,10 @@ main() {
     --json)
       [ -n "$env_name" ] || die "--json needs an env: 'xenv @<env> --json'"
       cmd_envdump_json "$env_name"
+      ;;
+    --json-base64|--json-b64)
+      [ -n "$env_name" ] || die "--json-base64 needs an env: 'xenv @<env> --json-base64'"
+      cmd_envdump_json "$env_name" b64
       ;;
     --dotenv|--env)
       [ -n "$env_name" ] || die "--dotenv needs an env: 'xenv @<env> --dotenv'"

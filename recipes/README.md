@@ -103,10 +103,25 @@ $env = json_decode(shell_exec('xenv @production --json'), true);
 db=$(xenv @production --json | jq -r .DATABASE_URL)
 ```
 
-`--json` emits one JSON object `{"KEY":"value",...}`; every value is
-byte-exact, control characters use JSON escapes (`\n`, `\t`, `\u00XX`),
+`--json` emits one JSON object `{"KEY":"value",...}`; values are byte-exact
+for valid UTF-8, control characters use JSON escapes (`\n`, `\t`, `\u00XX`),
 and an empty env is `{}`. Any stdlib JSON parser loads it — no envelope
 parsing, no crypto dependency, no per-language port.
+
+**`--json` is text/UTF-8 only.** A value that is raw bytes (a keyfile, a
+binary token, anything non-UTF-8) cannot round-trip as a JSON string. For
+binary fidelity use **`--json-base64`** (alias `--json-b64`): same flat
+`{"KEY":"..."}` shape, but every value is base64-encoded, so arbitrary bytes
+round-trip losslessly:
+
+```sh
+xenv @production --json-base64   # {"API_KEY":"c2stMTIz","TLS_KEY":"LS0tLS1CRUdJTi4uLg=="}
+```
+
+The convention is the endpoint itself: there is no in-band marker — you chose
+`--json-base64`, so decode every value with your stdlib base64 (an empty
+value is `""`). (The native recipes below read `.value.enc` directly and are
+already binary-safe, so this only concerns the `--json` shell-out path.)
 
 **When to use which:**
 
